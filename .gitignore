@@ -1,0 +1,25 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Data and Models
+data/
+models/*.pth
+!models/.gitkeep
+
+# Checkpoints
+models/checkpoint_*.pth
+
+# Outputs and Logs
+outputs/*
+!outputs/.gitkeep
+runs/
+
+# Generated Inputs
+inputs/*_ex*.png
+inputs/*_ex*.jpg
+
+# OS generated files
+.DS_Store
+Thumbs.db
