@@ -110,24 +110,24 @@ The system operates in a **two-stage coarse-to-fine architecture** controlled by
 ## Project Structure
 
 ```text
-CV_Project/
+SciForensics/
 ├── forensic_scanner.py            # Main CLI orchestrator — ties global + local pipelines together
+├── generate_examples.py           # Script to generate synthetic malicious manipulation examples
+├── run_demo.py                    # Script to auto-run the scanner on all base/generated examples
+├── .gitignore                     # Git configuration to ignore large binaries and cache
 ├── README.md                      # This file
-├── data/
-│   ├── train/bbbc038/             # Raw .png training images (BBBC038 microscopy dataset)
+├── data/                          # Dataset root (ignored in VC)
+│   ├── train/bbbc038/             # Raw .png training images
 │   └── valid/bbbc038/             # Raw .png validation images
-├── inputs/                        # Place suspect images here for batch scanning
-│   ├── krishna.png                # Example base image
-│   └── Lord_Krishna.jpg           # Example comparison image
-├── outputs/                       # Generated forensic reports and JSON summaries
-│   ├── report_krishna.png         # Visual forensic dashboard for krishna.png
-│   ├── report_Lord_Krishna.png    # Visual forensic dashboard for Lord_Krishna.jpg
-│   ├── summary_krishna.json       # Per-image JSON scan results
-│   ├── summary_Lord_Krishna.json
-│   └── overall_summary.json       # Aggregated batch results
+├── inputs/                        # Place suspect images here
+│   ├── base_cell.png              # Reference base image
+│   ├── base_cells_1.png           # Another reference base image
+│   └── base_cells_2.png           # Another reference base image
+├── outputs/                       # Generated forensic reports and JSON summaries appear here
+│   └── .gitkeep                   # Placeholder for empty output dir
 ├── models/
-│   └── weights.pth                # Pre-trained Siamese CNN weights (~34 MB)
-├── runs/                          # TensorBoard log directory (populated during training)
+│   ├── weights.pth                # Pre-trained Siamese CNN weights (~34 MB, ignored in VC)
+│   └── .gitkeep                   # Placeholder for model directory
 └── src/                           # Core library
     ├── global_matching/           # Deep learning Siamese pipeline
     │   ├── model.py               # CNN architecture + triplet loss + distance functions
@@ -448,13 +448,27 @@ python forensic_scanner.py inputs/krishna.png --cmfd
 
 #### Batch Scan — One Base Image vs. a Directory
 ```bash
-python forensic_scanner.py inputs/krishna.png inputs/ --output outputs/
+python forensic_scanner.py inputs/base_cell.png inputs/ --output outputs/
 ```
 This will:
 1. Find all `.jpg` and `.png` files in `inputs/`.
-2. Compare each against `krishna.png`.
+2. Compare each against `base_cell.png`.
 3. Save a `report_<name>.png` and `summary_<name>.json` for each pair.
 4. Save an aggregated `overall_summary.json`.
+
+#### Generating Demo Manipulations
+The project includes a script to synthesize simulated plagiarism attacks natively using the base images in `inputs/`:
+```bash
+python generate_examples.py
+```
+This generates 5 different malicious manipulations (Affine scaling/rotation, copy-move forgery, signal degradation, blackout masking, and extreme exposure shifts) for each base image.
+
+#### Running the Full Demo Suite
+If you want to run the scanner exhaustively on all permutations of the base and generated demo files, use the `run_demo.py` orchestrator:
+```bash
+python run_demo.py
+```
+This script acts as an automated wrapper for `forensic_scanner.py`. It loops over all input combinations, saves detailed individual reports to `outputs/demo/`, and stitches them together into massive consolidated visual forensics dashboards.
 
 #### Example JSON Output
 ```json

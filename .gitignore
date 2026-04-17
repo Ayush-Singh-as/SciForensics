@@ -5,7 +5,6 @@ __pycache__/
 
 # Data and Models
 data/
-models/*.pth
 !models/.gitkeep
 
 # Checkpoints
