@@ -1,0 +1,38 @@
+{
+  "_note": "Legacy (pre-refactor) output of forensic_scanner.py at commit ff1ff18, captured 2026-09-04 on CPython 3.12 / torch 2.14 / OpenCV 5.0. Kept as the 'before' half of the before/after bug table. Every number marked WRONG below is reproduced by the committed code.",
+  "command": "python forensic_scanner.py inputs/mountains.jpg inputs/mountains_manipulated.jpg",
+  "wall_clock_seconds": ">120 (timed out the 120s budget; 4x upscale of a 3840x2400 input = 147 Mpx)",
+  "global_distance": 0.816431,
+  "similarity_score": 0.545764,
+  "triggered_local_stage": true,
+  "keypoints_left": 2000,
+  "keypoints_right": 12,
+  "good_matches": 231,
+  "homography_verified": true,
+  "inlier_count": 107,
+  "inlier_ratio": 0.463203,
+  "estimated_rotation_deg": -58.0,
+  "estimated_scale": 0.0,
+  "estimated_translation": [1635.0, 272.7],
+  "flip_detected": false,
+  "decision": "Strong evidence of reused or manipulated scientific imagery",
+  "_ground_truth": {
+    "_how_measured": "ORB (8000 features) + crossCheck BFMatcher + cv2.estimateAffine2D(USAC_MAGSAC, 2.0px) between mountains.jpg and cv2.rotate(mountains_manipulated.jpg, ROTATE_180), at native resolution: 1492/1500 inliers.",
+    "rotation_deg": 180.0,
+    "scale": 1.0,
+    "flip": false,
+    "determinant": 0.9998,
+    "residual_rotation_after_undoing_180_deg": -0.005,
+    "also_cropped": "3840x2400 -> 2343x1421 canvas; the content itself is 1:1, so the size change is a crop and not a rescale.",
+    "_note": "A 180-degree rotation is orientation-PRESERVING, so the correct determinant is positive and the correct flip verdict is false. Undoing the rotation and fitting a flip instead yields 6/400 inliers -- pure noise. This pair therefore does NOT exercise bug 2; base_cell_ex1_affine (true: 45 deg + 1.2x + horizontal mirror) is the flip bug's demonstration case."
+  },
+  "known_defects_visible_in_this_output": {
+    "bug_3_degenerate_geometry": "estimated_scale=0.000 against a true scale of 1.000, estimated_rotation=-58 deg against a true 180 deg, and a 1635px translation -- three physically meaningless numbers reported as a verified homography",
+    "bug_4_many_to_one_matching": "231 matches / 107 'inliers' distributed over only 12 distinct right-hand keypoints; the match panel shows every line converging on a single point",
+    "bug_5_dead_attribution": "Global Heatmap B renders uniform blue (grad-sign annihilation)",
+    "bug_7_panel_overflow": "the verdict's final line sits on the bottom edge of the fixed 420px canvas",
+    "bug_9_similarity_cap": "similarity_score can never exceed sigmoid(1)=0.7311",
+    "bug_14_no_resolution_cap": "no max-dimension guard before the 4x enhancement upscale"
+  },
+  "_correct_verdict_is_still_reachable_here": "flip_detected=false happens to match ground truth, but by construction rather than by measurement: estimateAffinePartial2D returns a similarity transform whose determinant is a^2+b^2 and therefore cannot be negative (bug 2). The legacy pipeline reports 'no flip' on every input, including genuinely mirrored ones."
+}

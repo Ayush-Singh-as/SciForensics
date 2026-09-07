@@ -1,24 +1,75 @@
-# Python caches
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
-.pytest_cache/
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
 
-# Data and Models
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# ---------------------------------------------------------------------------
+# Datasets and model weights
+# ---------------------------------------------------------------------------
+# Datasets are never committed; see docs/DATA_CARD.md for how to fetch them.
 data/
+
+# Weights are distributed as GitHub Release assets and fetched by
+# sciforensics.weights.ensure(); only the directory placeholder is tracked.
+models/*
 !models/.gitkeep
 
-# Checkpoints
-models/checkpoint_*.pth
+# Local cache for downloaded weights / torch hub / timm checkpoints.
+.cache/
 
-# Outputs and Logs
+# ---------------------------------------------------------------------------
+# Run outputs
+# ---------------------------------------------------------------------------
 outputs/*
 !outputs/.gitkeep
 runs/
+benchmarks/results/
+benchmarks/cache/
 
-# Generated Inputs
+# Generated example inputs (regenerate with: sciforensics examples generate)
 inputs/*_ex*.png
 inputs/*_ex*.jpg
 
-# OS generated files
+# ---------------------------------------------------------------------------
+# Web frontend
+# ---------------------------------------------------------------------------
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
 .DS_Store
 Thumbs.db

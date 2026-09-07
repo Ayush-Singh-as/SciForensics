@@ -1,0 +1,346 @@
+# =============================================================================
+# SciForensics default configuration
+# =============================================================================
+# This file is the SINGLE source of truth for every threshold in the pipeline.
+# Nothing in the Python code carries a second, competing default: the pydantic
+# models in `sciforensics.config` are populated from this file, and `--set`
+# overrides on the CLI patch it in memory. The pre-refactor code had the same
+# threshold spelled three different ways (dataclass default 2.0, argparse
+# default 3.0, README 2.0); that class of bug is now structurally impossible.
+#
+# Override precedence (lowest to highest):
+#   this file  <  --config my.yaml  <  SCIFORENSICS_* env vars  <  --set k=v
+# =============================================================================
+
+runtime:
+  # Global RNG seed applied to python/numpy/torch and OpenCV. Set to null for
+  # nondeterministic runs.
+  seed: 1234
+  # auto | cpu | cuda | cuda:N | mps
+  device: auto
+  # Trade a little speed for bit-reproducibility across runs on the same device.
+  deterministic: true
+  log_level: INFO
+  # JSON logs for the API/container; console logs for interactive CLI use.
+  log_format: console
+  num_workers: 4
+
+image:
+  # Longest-edge cap applied at load time, BEFORE any enhancement upscale.
+  # The legacy code had no cap: a 3840x2400 input was upscaled 4x to 147 Mpx,
+  # which took over two minutes for a single pair. Coordinates are always
+  # reported back in the original pixel frame regardless of this cap.
+  max_dimension: 2048
+  # Input size for the embedding net.
+  #
+  # 128 is not a free parameter yet: the current checkpoint's head is
+  # Linear(8*8*128, 1024), which hard-codes a 128x128 input. Stage B2 replaces
+  # that head with global average pooling, after which any size (and in
+  # particular 224) becomes valid. `load_backbone()` reads the required size out
+  # of the checkpoint's fc1 and raises a clear error naming both numbers, rather
+  # than a shape-mismatch traceback, if these disagree.
+  embed_size: 128
+
+  # How a non-square image is fitted to embed_size x embed_size.
+  #
+  #   squash    - resize the whole frame to embed_size^2, ignoring aspect ratio
+  #   letterbox - scale by one factor, centre, and zero-pad the remainder
+  #
+  # `squash` is deliberate here, and it is the LEGACY behaviour rather than a
+  # fix, because the checkpoint leaves no better option. Training preprocessed
+  # with transforms.Resize(256) + CenterCrop(128) -- short side to 256 with
+  # aspect PRESERVED, then a centre crop -- while inference squashed the full
+  # frame. So the trained distribution matches neither mode: it is aspect-correct
+  # but sees only a centre window, and it has never seen padding.
+  #
+  # Measured over the 20 images in inputs/ (15 base-vs-manipulation positives,
+  # 175 cross-base negatives), separating positives from negatives by embedding
+  # distance:
+  #
+  #     squash (legacy)     AUC 0.957   best accuracy 0.963
+  #     train-style crop    AUC 0.941   best accuracy 0.956
+  #     letterbox           AUC 0.882   best accuracy 0.938
+  #
+  # Letterboxing this checkpoint makes it WORSE by 0.075 AUC, because the pad
+  # normalises to -1.0 and is out of distribution. Reproducing the training crop
+  # is also worse, and is unusable for forensics regardless: a centre crop at
+  # 128/256 discards most of the frame, so a manipulation outside the centre
+  # would never be examined at all.
+  #
+  # Set letterbox once stage B2 has retrained on letterboxed full frames. That
+  # retrain is the actual fix; this is the best available reading of the model
+  # that exists. n=190 pairs from one asset folder is a weak basis for the
+  # number above, and B6 re-derives it on a frozen split.
+  embed_resize: squash
+  letterbox_pad_value: 0
+
+global_match:
+  # Path to the embedding weights. null => resolved by
+  # sciforensics.weights.ensure(), which checks (in order) the local
+  # models/ directory, $SCIFORENSICS_WEIGHTS, and the pinned GitHub Release
+  # asset, verifying SHA-256 before use.
+  weights: null
+
+  # --- Decision thresholds -------------------------------------------------
+  # These are L1 distances in the 128-d embedding space. 1.0 is the decision
+  # boundary the network was ACTUALLY trained against: the training objective
+  # is sigmoid(1 - d) > 0.5, i.e. d < 1.0. The legacy default of 1.1 did not
+  # match the loss function it was trained with.
+  distance_threshold: 1.0
+  # Distances above the match threshold but below this one are ambiguous
+  # enough to be worth escalating to the (much more expensive) local stage.
+  local_trigger_distance: 2.0
+  # Temperature for mapping distance -> similarity in (0, 1):
+  #   similarity = sigmoid((distance_threshold - d) / temperature)
+  # The legacy formula sigmoid(1 - d) saturated at sigmoid(1) = 0.731, so no
+  # pair could ever score above 0.731 -- not even an image against itself.
+  similarity_temperature: 0.5
+
+  # --- Attribution ---------------------------------------------------------
+  attribution:
+    enabled: true
+    # Which convolutional block to compute Grad-CAM from, named rather than
+    # indexed. Grid size at embed_size=128:
+    #   block1 -> 64x64   block2 -> 32x32   block3 -> 16x16   block4 -> 8x8
+    # The legacy code used the last block (8x8) and upsampled it over the
+    # whole image, which is too coarse to localise anything smaller than an
+    # eighth of the frame. block3 is the sweet spot: stable gradients, but
+    # fine enough to point at a specific panel feature.
+    stage: block3
+    # Because d = sum|e_L - e_R|, the gradient w.r.t. the right embedding is the
+    # exact negation of the gradient w.r.t. the left. The legacy code pooled both
+    # signed gradients and then applied a ReLU -- the 'relu' mode below. Measured
+    # as the FRACTION OF THE MAP ZEROED (left / right), over three input pairs:
+    # base_cell.png vs a manipulation of itself, vs an unrelated image, and a
+    # synthetic texture pair.
+    #
+    #                          left zero%     right zero%    ratio
+    #     relu,   block4     1.6/1.6/1.6   100/100/98.4     64x     <- LEGACY
+    #     signed, block4     1.6/1.6/1.6   1.6/1.6/1.6      1.0x
+    #     abs,    block4     1.6/1.6/1.6   1.6/1.6/1.6      1.0x
+    #     relu,   block3    69.9/25.0/100  21.1/6.6/0.4     3-256x
+    #     signed, block3     0.4/0.4/0.4   0.4/0.4/0.4      1.0x
+    #     abs,    block3     0.4/0.4/0.4   0.4/0.4/0.4      1.0x
+    #
+    # Row 1 is the bug: the right-hand map is zero essentially everywhere for
+    # every pair, and every "Global Heatmap B" in the old reports is uniform blue.
+    #
+    # Only 'relu' reproduces it. 'signed' pools the same signed gradient but takes
+    # abs of the MAP, which restores the symmetry the ReLU destroyed -- its cost is
+    # spatial cancellation between channels, not a dead branch.
+    #
+    # Row 4 is why the pooling mode and not the stage is the fix. Deeper in the
+    # trunk the branches' Jacobians have diverged enough that the sign flip only
+    # partially survives, dropping the asymmetry from 64x to 3-4x: still broken,
+    # no longer obvious in a report, and now intermittent (the synthetic pair
+    # still annihilates a branch completely). Moving to block3 for resolution
+    # reasons would have MASKED this rather than fixed it.
+    #
+    # 'abs' pools |grad|, which is non-negative, so both branches are treated the
+    # same and no ReLU is needed -- the block activations are already non-negative.
+    # Its 1.6% / 0.4% floor is exactly 1/64 and 1/256: the argmin cell, sent to
+    # zero by the rescale to [0, 1]. That is normalisation, not suppression.
+    #
+    # 'relu' and 'signed' remain selectable so the failure above is reproducible
+    # rather than merely described. Selecting either logs a warning at startup.
+    gradient_pooling: abs
+    colormap: JET
+    alpha: 0.45
+
+local_match:
+  # orb (CPU, always available) | disk | superpoint  (the latter two need
+  # the [match] extra and are added in stage B3)
+  detector: orb
+  # mutual_nn (ratio test + mutual nearest neighbour) | lightglue
+  matcher: mutual_nn
+
+  max_features: 2000
+  # Hard arithmetic floor per side, below which matching is not attempted.
+  # Mutual-NN matching is injective, so inlier rows can never exceed the smaller
+  # keypoint set: at fewer than geometry.min_inliers keypoints, verification is
+  # impossible rather than unlikely, and matching is wasted work. Set equal to
+  # geometry.min_inliers, which is the smallest value the cross-section
+  # invariant in config.py permits. Do NOT raise this as a quality heuristic --
+  # that is roi.min_keypoints below. A value of 100 here (which is where the two
+  # started life as one knob) refuses every 256x256 panel in inputs/ with
+  # `too_few_keypoints`, hiding the fact that they really fail at min_matches.
+  min_keypoints_per_side: 15
+
+  # Lowe's ratio test.
+  nn_ratio: 0.8
+  # Require i to be j's best match AND j to be i's best match. This alone
+  # makes the many-to-one degeneracy above impossible.
+  mutual_nn: true
+
+  orb:
+    scale_factor: 1.2
+    n_levels: 8
+    edge_threshold: 31
+    patch_size: 31
+    fast_threshold: 10
+
+  enhance:
+    enabled: true
+    # Upsampling factor used to recover keypoints from small/low-contrast
+    # panels. Threaded through every coordinate transform from a single
+    # place; the legacy code hardcoded the matching `/ 4.0` in six spots, so
+    # changing it silently corrupted every reported coordinate.
+    scale: 4.0
+    interpolation: cubic
+    clahe_clip_limit: 2.0
+    clahe_tile_grid: 8
+
+  roi:
+    # Difference-of-Gaussians blob detection to focus ORB on structure
+    # instead of JPEG noise.
+    enabled: true
+    dog_sigma_low: 1.0
+    dog_sigma_high: 2.0
+    dog_threshold: 0.02
+    min_area: 16
+    max_regions: 64
+    dilate_px: 8
+    # Quality threshold on the mask itself: if restricting to ROIs would leave
+    # fewer than this many keypoints, the band-pass filter is judged to have
+    # discarded too much, the restriction is dropped for that side, and the
+    # event is recorded in the evidence as `roi_abandoned`. The legacy value was
+    # a bare `< 8` decided per side with no record, which is how the mountains
+    # pair came to match 2000 keypoints against 12.
+    min_keypoints: 100
+
+geometry:
+  # magsac (USAC_MAGSAC++, recommended) | ransac | lmeds
+  method: magsac
+  reproj_threshold: 4.0
+  max_iters: 10000
+  confidence: 0.999
+
+  # --- Acceptance gates ----------------------------------------------------
+  min_matches: 8
+  min_inliers: 15
+  min_inlier_ratio: 0.18
+  # Degeneracy gates. Every one of these exists because the legacy pipeline
+  # reported a verified homography for the mountains pair with scale 0.000
+  # and a 1635 px translation.
+  #
+  # Distinct correspondences, not raw inlier rows: 107 inliers spread over 12
+  # unique keypoints is 12 constraints, not 107.
+  min_distinct_inliers: 12
+  # Inliers must span a meaningful fraction of the image diagonal; a cluster
+  # of correspondences in one corner cannot constrain a global transform.
+  min_inlier_spread: 0.10
+  # Root-mean-square symmetric reprojection error over the inlier set. Measured
+  # in ANALYSIS pixels (post-max_dimension downscale), which is the same space
+  # reproj_threshold is expressed in.
+  max_reproj_rms: 5.0
+  # Reject numerically degenerate homographies outright. Measured on the
+  # diagonal-normalised homography, NOT the raw pixel-space one: a raw matrix
+  # mixes O(1) linear terms with O(image-size) translation, so its condition
+  # number tracks translation magnitude rather than degeneracy. A healthy fit
+  # normalises to roughly 1-10 (the mountains 180-degree rotation scores 2.6);
+  # 1000 leaves ample headroom for strong-but-real perspective warps while still
+  # catching direction-collapsing transforms.
+  max_condition_number: 1.0e3
+
+  affine:
+    # full  -> cv2.estimateAffine2D, 6 DOF: rotation, anisotropic scale,
+    #          shear, AND reflection. det(A) < 0 detects a flip.
+    # similarity -> cv2.estimateAffinePartial2D, 4 DOF. Its matrix is
+    #          [[a, -b, tx], [b, a, ty]] so det = a^2 + b^2 > 0 ALWAYS, which
+    #          makes flip detection mathematically unreachable. The legacy
+    #          code used this and then tested `det < 0`, so it reported
+    #          "Flip detected: no" for every mirrored image ever given to it.
+    model: full
+    method: magsac
+    reproj_threshold: 4.0
+    # Flag |sx/sy - 1| above this as anisotropic scaling (a strong
+    # manipulation signal, and impossible to express with `similarity`).
+    anisotropy_tolerance: 0.05
+    shear_tolerance_deg: 2.0
+
+copy_move:
+  enabled: true
+  max_features: 2000
+  nn_ratio: 0.8
+  # A keypoint must not match another within this radius, or every match is
+  # just the keypoint finding itself.
+  min_spatial_separation: 32
+  # k nearest descriptors considered per keypoint -- >2 is required to find
+  # a region cloned more than once.
+  knn: 6
+
+  cluster:
+    # DBSCAN over the normalised offset/scale/rotation vector
+    # (dx, dy, log s, theta). The legacy code fit ONE global similarity
+    # transform over all self-matches, so `regions` could never contain more
+    # than a single entry no matter how many clones were present.
+    eps: 0.08
+    min_samples: 6
+    # Weights for (dx, dy, log_scale, theta) before clustering. dx/dy are
+    # normalised by the image diagonal first; theta is encoded as a
+    # (cos, sin) pair so that +179 deg and -179 deg cluster together.
+    #
+    # log_scale is weighted ZERO for ORB, deliberately. ORB's keypoint `size`
+    # is octave-quantised, so log(size_dst / size_src) can only ever be a
+    # multiple of log(orb.scale_factor) = log(1.2) = 0.182 -- already 2.3x the
+    # `eps` above. The feature cannot express "these two agree approximately";
+    # it can only say "same octave" or "hard split". Measured on a 1.25x clone,
+    # the 14 correspondences at the true offset spread over
+    # {-2, 0, +1, +2} x log(1.2), a weighted span of 0.365 at w=0.5 -- 4.5x eps,
+    # which sent all 14 to DBSCAN noise and reported ZERO regions. At w=0.0 the
+    # same clone is found, and every other case gains inliers too.
+    #
+    # Turn this back on for a detector whose scale is continuous (SIFT, or the
+    # DISK/SuperPoint backends arriving in stage B3); the code is general, only
+    # the shipped default is detector-specific.
+    #
+    # theta stays at 0.5 and is load-bearing: dropping it loses a 30 deg
+    # rotated clone entirely, merges two clones sharing a displacement, and
+    # costs precision -- an unmanipulated textured control starts reporting a
+    # region, because consistent orientation delta is much of what separates a
+    # real clone from coincidentally-parallel noise matches.
+    feature_weights: [1.0, 1.0, 0.0, 0.5]
+
+  # Per-cluster geometric verification.
+  min_cluster_inliers: 8
+  reproj_threshold: 4.0
+  # Morphological closing applied to the per-region mask, in px.
+  mask_close_px: 9
+  max_regions: 8
+
+fusion:
+  # Path to a fitted calibrator (stage B5). Until one exists the verdict falls
+  # back to the documented rule table in sciforensics.fusion.rules, and the
+  # reported confidence is explicitly labelled UNCALIBRATED.
+  calibrator: null
+  # Probability bands for the human-readable verdict.
+  bands:
+    likely_manipulated: 0.85
+    suspicious: 0.60
+    inconclusive: 0.35
+    # below `inconclusive` => clean
+
+report:
+  # pdf | html | png | json
+  formats: [pdf, json]
+  # Include the full audit block: input SHA-256s, tool version, config hash,
+  # git commit, UTC timestamp, and the resolved device.
+  audit_trail: true
+  thumbnail_max_px: 900
+  # Draw the convex hull of geometrically verified inliers. This is the
+  # overlay a reader should actually trust -- unlike the attribution heatmap,
+  # it is derived from correspondences that survived RANSAC.
+  draw_inlier_hull: true
+  draw_match_lines: true
+  max_match_lines: 120
+
+api:
+  host: 127.0.0.1
+  port: 8000
+  cors_origins: ["http://localhost:3000"]
+  max_upload_bytes: 33554432   # 32 MiB
+  # Guard against decompression bombs: reject images whose decoded pixel
+  # count exceeds this, before allocating.
+  max_decoded_pixels: 50000000
+  job_ttl_seconds: 3600
+  max_concurrent_jobs: 4

@@ -1,0 +1,218 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sciforensics"
+version = "0.2.0.dev0"
+description = "Forensic detection of image plagiarism and manipulation in scientific publications"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Ayush Singh" }]
+keywords = [
+    "image-forensics",
+    "research-integrity",
+    "copy-move-forgery",
+    "plagiarism-detection",
+    "computer-vision",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "Pillow>=10.0",
+    "torch>=2.1",
+    "torchvision>=0.16",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "PyYAML>=6.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "scikit-image>=0.22",
+    "scikit-learn>=1.4",
+]
+
+[project.optional-dependencies]
+# Learned local matching (DISK / SuperPoint / LightGlue / LoFTR) and the DINOv2 baseline.
+match = ["kornia>=0.7.2", "timm>=1.0"]
+# HTML/PDF forensic reports.
+report = ["Jinja2>=3.1", "weasyprint>=61.0", "ImageHash>=4.3"]
+# FastAPI service backing the web demo.
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "python-multipart>=0.0.9"]
+# Training the embedding model.
+train = ["tensorboard>=2.16", "tqdm>=4.66"]
+# Benchmark harness: plots, corpus-scale retrieval, PDF figure ingestion.
+bench = ["matplotlib>=3.8", "faiss-cpu>=1.8", "PyMuPDF>=1.24", "pandas>=2.2"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "types-PyYAML",
+]
+all = ["sciforensics[match,report,api,train,bench]"]
+
+[project.scripts]
+sciforensics = "sciforensics.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/ayushsingh/SciForensics"
+Repository = "https://github.com/ayushsingh/SciForensics"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sciforensics"]
+
+# `configs/default.yaml` is deliberately kept at the repo root -- it is the file
+# the README points at and the one an editable install reads -- but every
+# threshold in the tool comes from it, so a wheel without it cannot load a
+# config at all. Ship a copy at the packaged location `default_config_path()`
+# falls back to. The wheel-install job in CI is what keeps this honest.
+[tool.hatch.build.targets.wheel.force-include]
+"configs/default.yaml" = "sciforensics/data/default.yaml"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/sciforensics", "configs", "tests", "README.md", "LICENSE"]
+
+# ---------------------------------------------------------------------------
+# Lint / format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = [
+    # Ruff formats Python inside markdown fences. Here that is the wrong default:
+    # the docs quote *legacy* code as audit evidence, and a formatter rewriting a
+    # quotation misrepresents what was actually there. Code samples that need to
+    # be checked belong in `examples/` as real files, not in reformatted prose.
+    "*.md",
+    # The prototype, kept in place until the end of A0 so the audit's line
+    # references (`local_detector.py:144`, `pairwise_inference.py:94`,
+    # `dataset.py:72`, ...) keep pointing at the code they describe. Reformatting
+    # it would shift every one of them to document a file that is about to be
+    # deleted. Remove these entries together with the files.
+    "forensic_scanner.py",
+    "run_demo.py",
+    "generate_examples.py",
+    "src/global_matching/",
+    "src/local_matching/",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "C4",   # comprehensions
+    "PTH",  # use pathlib
+    "RUF",  # ruff-specific
+    "N",    # pep8-naming
+    "ARG",  # unused arguments
+    "TID",  # tidy imports
+]
+ignore = [
+    "B008",    # typer uses function calls in argument defaults by design
+    "N806",    # allow matrix-style locals (H, M, K) in geometry code
+    "N803",    # ...and matrix-style arguments
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ARG001", "ARG002"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sciforensics", "tests"]
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+[tool.mypy]
+# Deliberately NOT pinned to the 3.10 floor in `requires-python`: numpy >= 2.2
+# ships stubs written with PEP 695 `type` statements, which mypy rejects outright
+# when told to assume 3.10, aborting the run before it checks anything of ours.
+# Runtime 3.10 compatibility is guarded where it is actually observable -- the
+# pytest matrix runs on 3.10/3.11/3.12 -- rather than by a type-checker flag.
+python_version = "3.12"
+# `tests` is checked too. A regression suite is only as trustworthy as its own
+# correctness, and the fixtures pass typed arrays and config models around --
+# exactly the surface a silent `Any` hides in.
+files = ["src/sciforensics", "tests"]
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_return_any = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2.*",
+    "kornia.*",
+    "timm.*",
+    "skimage.*",
+    "sklearn.*",
+    "imagehash.*",
+    "weasyprint.*",
+    "faiss.*",
+    "fitz.*",
+    "matplotlib.*",
+    "torchvision.*",
+]
+ignore_missing_imports = true
+
+# The plugin is here for one thing mypy cannot see on its own: `frozen=True` lives
+# in `ConfigDict`, not in the class syntax, so without it an assignment to a
+# settings field type-checks fine and fails at runtime. `init_typed` is not
+# optional -- the plugin *replaces* mypy's native dataclass_transform handling of
+# `__init__`, and defaults to `**kwargs: Any`, so leaving it off would trade a
+# real frozen check for the loss of every constructor check.
+[tool.pydantic-mypy]
+init_typed = true
+init_forbid_extra = true
+warn_required_dynamic_aliases = true
+warn_untyped_fields = true
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+# `tests` is a real package with shared builders in `tests/helpers.py`. importlib
+# mode imports test modules under their full dotted name instead of injecting
+# directories onto sys.path, so `from tests.helpers import ...` resolves the same
+# way for pytest, mypy and an editor. `pythonpath` puts the repo root on the path
+# so that dotted name is findable without installing the test package.
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+pythonpath = ["."]
+markers = [
+    "slow: takes more than a couple of seconds (deselect with -m 'not slow')",
+    "gpu: requires CUDA",
+    "weights: requires the pretrained embedding weights to be present",
+    "data: requires the training/benchmark datasets to be present",
+]
+filterwarnings = ["error::DeprecationWarning:sciforensics.*"]
+
+[tool.coverage.run]
+source = ["src/sciforensics"]
+branch = true
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]

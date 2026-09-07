@@ -1,0 +1,79 @@
+# Local gate, mirroring the `lint` job in .github/workflows/ci.yml.
+#
+# Two of the hooks below exist because of defects this repository actually had,
+# not as boilerplate: `check-added-large-files` because a 35 MB weights blob was
+# committed straight into git history, and `mixed-line-ending` because two source
+# files carried CRLF endings and produced a permanent phantom 168-line diff in
+# every working tree. Both are the kind of mistake that is trivial to prevent and
+# expensive to undo.
+#
+#   pre-commit install && pre-commit run --all-files
+
+default_language_version:
+  python: python3.12
+
+# The prototype, frozen until it is deleted at the end of A0. The audit's line
+# references (`local_detector.py:144`, `pairwise_inference.py:94`, `dataset.py:72`)
+# have to keep pointing at the code they describe, so nothing may rewrite these
+# files -- not even to strip trailing whitespace. The regex below is anchored on
+# the first hook that needs it and reused by the rest; it mirrors `extend-exclude`
+# in pyproject.toml's `[tool.ruff]`. Remove both together with the files.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        # Model weights belong in a release asset fetched by `weights.ensure()`,
+        # which verifies a SHA-256; they do not belong in history, where they are
+        # permanent. 1 MB is comfortably above any source file here.
+        args: [--maxkb=1024]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: &legacy >-
+          ^(forensic_scanner|run_demo|generate_examples)\.py$|^src/(global_matching|local_matching)/
+      - id: end-of-file-fixer
+        exclude: *legacy
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        exclude: *legacy
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: debug-statements
+      - id: forbid-submodules
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # A `system` hook rather than pre-commit's usual isolated environment: mypy
+  # needs the project's own dependency graph to check anything meaningfully, and
+  # duplicating that graph into `additional_dependencies` would mean installing
+  # torch into a second virtualenv and keeping two lists of versions in sync.
+  # This runs the mypy the developer already has, over the whole tree, because
+  # type errors are not confined to the files a commit happens to touch.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+
+      # Fast enough to be a commit gate (~4 s) and the whole point of the suite
+      # is that it runs before a mistake is recorded, not after. Anything slower
+      # is marked `slow` and left to CI.
+      - id: pytest
+        name: pytest
+        entry: pytest -q -m "not slow and not gpu and not weights and not data"
+        language: system
+        types: [python]
+        pass_filenames: false
+        require_serial: true

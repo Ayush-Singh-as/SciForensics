@@ -1,0 +1,38 @@
+# Normalize line endings so Windows/Linux checkouts stop producing phantom diffs.
+* text=auto eol=lf
+
+*.py      text eol=lf
+*.pyi     text eol=lf
+*.md      text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.toml    text eol=lf
+*.json    text eol=lf
+*.cfg     text eol=lf
+*.txt     text eol=lf
+*.j2      text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.ts      text eol=lf
+*.tsx     text eol=lf
+*.sh      text eol=lf
+Dockerfile text eol=lf
+
+# Binary assets: never touch, and do not diff.
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.tif     binary
+*.tiff    binary
+*.bmp     binary
+*.gif     binary
+*.pdf     binary
+*.pth     binary
+*.pt      binary
+*.onnx    binary
+*.npy     binary
+*.npz     binary
+
+# Keep generated lockfiles and benchmark artifacts out of diff review noise.
+*.lock    linguist-generated=true -diff
+web/package-lock.json linguist-generated=true -diff

@@ -1,0 +1,169 @@
+# The gate job runs `pre-commit run --all-files` rather than re-listing ruff,
+# mypy and pytest here. That is deliberate: a CI definition that drifts from the
+# local hooks means "it passed on my machine" stops being informative, and the
+# duplication is exactly where that drift starts.
+#
+# The `package` job exists because the failure it catches is invisible any other
+# way. Every threshold in this tool is read from `configs/default.yaml`, which
+# lives at the repo root -- so an editable install works, a wheel install raises
+# `ConfigError` on the first config load, and nothing in the test suite can tell
+# the difference. It installs the built artifact into a clean environment and
+# runs the whole suite against that instead of against the checkout.
+#
+# Still to come: a container job, which lands with the Dockerfile. Its smoke test
+# is `sciforensics --version`, so it is worth nothing until the CLI exists.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded run's result is not information anyone will act on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Nothing here can use a GPU, and the default Linux torch wheel drags in ~2.5 GB
+  # of `nvidia-*` packages to provide one. Resolving from the CPU index turns a
+  # cold install from minutes into seconds.
+  UV_TORCH_BACKEND: cpu
+  FORCE_COLOR: "1"
+  PYTHONHASHSEED: "0"
+
+jobs:
+  gate:
+    name: lint, types, tests (3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          # Pinned to the version used in local development, so a uv release
+          # cannot change what "green" means without a visible commit.
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Install
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      # `--show-diff-on-failure` matters for the formatting and whitespace hooks:
+      # it prints the fix instead of only naming the file.
+      - name: Run the commit gate
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  test:
+    name: tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One version failing is a fact about that version; cancelling the others
+      # hides whether it is the floor, the ceiling, or all three.
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Install
+        run: uv pip install --system -e ".[dev]"
+
+      # Coverage is collected once rather than on every leg: the matrix is here to
+      # catch stdlib and syntax differences across versions, not to measure the
+      # same lines three times.
+      - name: Test
+        if: matrix.python-version != '3.12'
+        run: pytest -q
+
+      - name: Test with coverage
+        if: matrix.python-version == '3.12'
+        run: pytest -q --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: error
+
+  package:
+    name: wheel install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.5"
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Check the distribution metadata
+        run: uvx twine check --strict dist/*
+
+      - name: Install the wheel into a clean environment
+        run: |
+          uv venv "$RUNNER_TEMP/wheel-env"
+          uv pip install --python "$RUNNER_TEMP/wheel-env" "$(echo dist/*.whl)[dev]"
+
+      # The check the editable install cannot make: `default_config_path()` must
+      # find the copy `force-include` puts inside the package, not the one at the
+      # repo root. Run from a scratch directory so the checkout cannot supply it.
+      - name: The packaged config must resolve from site-packages
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/wheel-env/bin/python" - <<'PY'
+          from sciforensics.config import default_config_path, load_config
+
+          path = default_config_path()
+          assert "site-packages" in str(path), f"resolved outside the package: {path}"
+          settings = load_config(use_env=False)
+          print(f"{path} -> config fingerprint {settings.fingerprint()[:12]}")
+          PY
+
+      # `tests/` is not in the wheel's import path, but `sciforensics` now is, so
+      # this exercises the built artifact against the same assertions.
+      - name: The suite must pass against the built artifact
+        run: "$RUNNER_TEMP/wheel-env/bin/python -m pytest -q"
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
