@@ -498,6 +498,55 @@ def config_cmd(
         _out.print_json(json.dumps(payload))
 
 
+@app.command(name="splits")
+def splits_cmd(
+    root: Path = typer.Argument(..., exists=True, file_okay=False, readable=True),
+    dataset: str = typer.Option(..., "--dataset", "-d", help="Name recorded in the manifest."),
+    layout: Optional[str] = typer.Option(
+        None, "--layout", help="Force a layout: bbbc038, polimi, biofors, flat. Default: detect."
+    ),
+    out: Optional[Path] = typer.Option(
+        None,
+        "--out",
+        "-o",
+        help="Write the manifest here (default: benchmarks/splits/<dataset>.json).",
+    ),
+    log_level: str = _LogLevelOpt,
+    log_format: str = _LogFormatOpt,
+) -> None:
+    """Build a frozen, content-addressed train/val/calib/test manifest.
+
+    Stage B1. The discovery half is **bug 1's fix**: the prototype excluded mask
+    directories with ``"mask" not in parts`` while BBBC038's directory is
+    ``masks``, so 29,461 of the 30,131 files it loaded were segmentation masks
+    against 670 real images.
+    """
+    _bootstrap(None, None, log_level, log_format)
+    from sciforensics.global_match.data import DataError, build_manifest
+
+    try:
+        manifest = build_manifest(root, dataset=dataset, name=layout)
+    except DataError as exc:
+        raise _fail(exc, "split manifest failed") from exc
+
+    destination = out or Path("benchmarks/splits") / f"{dataset}.json"
+    manifest.write(destination)
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_row("dataset", manifest.dataset)
+    table.add_row("layout", manifest.layout)
+    for split, count in manifest.counts().items():
+        table.add_row(split, str(count))
+    table.add_row("unique files", str(len(manifest.files)))
+    if manifest.duplicates:
+        table.add_row(
+            "duplicates",
+            f"[yellow]{sum(len(v) for v in manifest.duplicates.values())}[/] (share a split)",
+        )
+    _out.print(table)
+    _out.print(f"\n[bold]Manifest:[/] {destination}")
+
+
 @app.command()
 def serve(
     config: Path | None = _ConfigOpt,

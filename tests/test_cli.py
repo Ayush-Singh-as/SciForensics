@@ -33,7 +33,7 @@ runner = CliRunner()
 
 # Every command registered on the app. Parametrising over this rather than
 # listing names twice means a new subcommand is covered the moment it is added.
-COMMANDS = ["compare", "cmfd", "config", "serve", "version"]
+COMMANDS = ["compare", "cmfd", "config", "splits", "serve", "version"]
 
 
 def test_app_exposes_the_documented_commands() -> None:

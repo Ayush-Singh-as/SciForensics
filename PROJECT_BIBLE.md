@@ -62,7 +62,8 @@ Stage **B** (defensible science), Stage **C** (deployable tool).
 | **A2** Fix bugs 1–13 | 13 of 14 fixed and **empirically verified against real images** | ✅ — only **bug 1** remains (needs B1's data loader) |
 | **A3** Real reports | Jinja2 HTML → PDF (Chromium *or* WeasyPrint), raster overlays | ✅ **done** — **bug 7 closed and PDF verified**: 2-page PDF, extractable text, full disclaimer intact |
 | **A4** Web demo | FastAPI + Next.js 16, docker-compose | ✅ **done** — API + UI build and run; end-to-end analysis verified via CLI |
-| **B0–B6** Science | Data hygiene, retrain, LightGlue, multi-region CMFD eval, calibration, benchmarks | 🔄 **in progress** (`fusion/calibrate.py` scaffolded, unfitted) |
+| **B1** Data hygiene | Layout-aware discovery, frozen content-addressed splits, `DATA_CARD.md` | ✅ **done** — **bug 1 closed; all 14 bugs now fixed** |
+| **B2–B6** Science | Retrain, LightGlue, CMFD eval, calibration, benchmarks | ⏳ **B2 blocked**: no datasets downloaded (`data/` is gitignored and empty) |
 | **C1–C4** Product | PDF→panels, FAISS retrieval, hardening, docs | ❌ **not started** |
 
 **~14,500 lines** landed in commit `bcb29bc` ("Fixed some bugs") — the entire `src/sciforensics/`
@@ -116,11 +117,11 @@ pass `--set global_match.weights=models/weights.pth` on the CLI for now.
 
 Bugs 1–13 are from the plan's audit; **bug 14 was discovered during implementation.**
 Marked ✅ where fixed in the shipped package, ⏳ where the owning module doesn't exist yet.
-**13 of 14 are now fixed; only bug 1 remains.**
+**All 14 are now fixed.**
 
 | # | Bug | Why it silently lied | Fix | State |
 |---|---|---|---|---|
-| 1 | **82% of training data is binary masks.** Loader filtered `"mask" not in parts`, but BBBC038's dir is `masks` *(plural)*. 29,461 of 30,131 files were instance masks; real images: **670**. | Model largely trained on segmentation masks | Exclude by resolved dataset layout, not substring | ⏳ needs `global_match/data.py` (B1) |
+| 1 | **82% of training data is binary masks.** Loader filtered `"mask" not in parts`, but BBBC038's dir is `masks` *(plural)*. 29,461 of 30,131 files were instance masks; real images: **670**. | Model largely trained on segmentation masks | `global_match/data.py`: each dataset declares a `Layout`; components matched **exactly**, never as substrings. Verified: 5,400-file synthetic tree (97.8% masks) → manifest of exactly **120 images** | ✅ |
 | 2 | **Flip detection was mathematically unreachable.** `estimateAffinePartial2D` returns a *similarity* matrix `[[a,-b,tx],[b,a,ty]]`; `det = a²+b² > 0` **always**, yet the code tested `det < 0`. | "Flip detected: no" for *every* mirrored image, forever | `estimateAffine2D` (full 6-DOF), decompose by SVD/QR, `det < 0` now genuinely reachable | ✅ |
 | 3 | **Mirrored content collapsed the geometry fit.** A similarity transform cannot represent a reflection, so estimation degenerated: true 45°+1.2×+hflip reported `rot 15.4°, scale 0.048`; mountains reported `scale 0.000`. | Garbage transform parameters | Same as bug 2 | ✅ |
 | 4 | **Degenerate many-to-one matching → phantom verifications.** No cross-check. ROI filter's hard `<8` fallback allowed 12 keypoints vs 2,000 → **231 matches, 121 "inliers"** all landing on ≤12 distinct points. Verdict: *"Strong evidence."* | Confident false positives | Mutual-NN (**injective**) + ratio + per-side keypoint floor + degeneracy rejection (distinct count, spatial spread, reproj RMS, condition number) | ✅ |
