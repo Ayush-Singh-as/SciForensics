@@ -68,7 +68,9 @@ Stage **B** (defensible science), Stage **C** (deployable tool).
 | **B2** Retrain | GAP head, BCEWithLogits, hard negatives | ⏳ **blocked**: no datasets downloaded (`data/` is gitignored and empty) |
 | **B4** CMFD eval | Per-pixel IoU/F1 vs Polimi masks | ⏳ blocked on Polimi download; **defaults need retuning** (see §8b) |
 | **B5** Calibration | Fit logistic/isotonic on the `calib` split | ⏳ blocked on B2/B4 |
-| **C1–C4** Product | PDF→panels, FAISS retrieval, hardening, docs | ❌ **not started** |
+| **C1** PDF→panels | PyMuPDF extraction (lossless/render, provenance recorded) + gutter-projection panel splitting | ✅ **done** — verified against constructed layouts |
+| **C2** Retrieval | Dihedral-pHash prefilter + `scan`/`index` commands | ✅ **done** — planted duplicate caught at 100% coverage |
+| **C3–C4** Hardening, docs | Job queue, ONNX, mkdocs site, tech report | ❌ **not started** |
 
 **~14,500 lines** landed in commit `bcb29bc` ("Fixed some bugs") — the entire `src/sciforensics/`
 package, the test suite, CI, and config.

@@ -547,6 +547,148 @@ def splits_cmd(
     _out.print(f"\n[bold]Manifest:[/] {destination}")
 
 
+@app.command(name="scan")
+def scan_cmd(
+    pdf: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    out: Path = typer.Option(
+        Path("out/scan"), "--out", "-o", help="Where panels and the report land."
+    ),
+    hamming_max: int = typer.Option(
+        32,
+        "--hamming-max",
+        help="pHash gate. 64 disables the prefilter and compares every pair.",
+    ),
+    max_pairs: int = typer.Option(
+        500, "--max-pairs", help="Cap on pairs analysed after prefiltering. 0 = no cap."
+    ),
+    config: Path | None = _ConfigOpt,
+    set_: Optional[list[str]] = _SetOpt,
+    device: str | None = _DeviceOpt,
+    as_json: bool = _JsonOpt,
+    log_level: str = _LogLevelOpt,
+    log_format: str = _LogFormatOpt,
+) -> None:
+    """Audit a whole manuscript: PDF -> figures -> panels -> every pair.
+
+    Stage C1+C2. This is the workflow an editor actually has -- a submission,
+    not a curated pair of PNGs.
+    """
+    cfg = _bootstrap(config, set_, log_level, log_format)
+
+    from sciforensics.io.pdf import PdfError
+    from sciforensics.scan import scan_manuscript
+
+    try:
+        report = scan_manuscript(
+            pdf,
+            cfg,
+            workdir=out,
+            device=device or "cpu",
+            hamming_max=hamming_max,
+            max_pairs=max_pairs or None,
+        )
+    except PdfError as exc:
+        raise _fail(exc, "scan failed") from exc
+
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_row("figures", str(report.figures))
+    table.add_row("panels", str(report.panels))
+    table.add_row("pairs analysed", f"{report.pairs_analysed} of {report.pairs_total}")
+    # Coverage is printed unconditionally: a prefilter buys speed with recall,
+    # and a scan reporting "nothing found" over 12% coverage means something
+    # very different from one over 100%.
+    coverage = f"{report.coverage:.1%}"
+    table.add_row("coverage", coverage if report.coverage > 0.99 else f"[yellow]{coverage}[/]")
+    table.add_row("elapsed", f"{report.seconds:.1f}s")
+    _out.print(table)
+
+    for warning in report.warnings:
+        _err.print(f"  [magenta]warning:[/] {warning}")
+
+    if not report.flagged:
+        _out.print("\n[green]No panel pair was flagged.[/]")
+    else:
+        found = Table(title=f"{len(report.flagged)} flagged pair(s)", header_style="bold")
+        found.add_column("conf", justify="right")
+        found.add_column("verdict")
+        found.add_column("panel A")
+        found.add_column("panel B")
+        found.add_column("inliers", justify="right")
+        for finding in report.flagged:
+            label = finding.verdict.replace("_", " ")
+            if not finding.trustworthy:
+                label += " [yellow](doubtful split)[/]"
+            found.add_row(
+                f"{finding.confidence:.3f}",
+                label,
+                finding.left,
+                finding.right,
+                str(finding.inliers),
+            )
+        _out.print(found)
+
+    destination = Path(out) / "scan.json"
+    destination.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    if as_json:
+        _out.print_json(json.dumps(report.to_dict()))
+    _out.print(f"\n[bold]Report:[/] {destination}")
+
+
+@app.command(name="index")
+def index_cmd(
+    corpus: Path = typer.Argument(..., exists=True, file_okay=False, readable=True),
+    out: Path = typer.Option(Path("out/index.json"), "--out", "-o", help="Index destination."),
+    query: Path | None = typer.Option(
+        None, "--query", "-q", exists=True, dir_okay=False, help="Search instead of building."
+    ),
+    hamming_max: int = typer.Option(32, "--hamming-max", help="Maximum pHash distance."),
+    top_k: int = typer.Option(10, "--top-k", "-k", help="Results to return when querying."),
+    log_level: str = _LogLevelOpt,
+    log_format: str = _LogFormatOpt,
+) -> None:
+    """Build or query a perceptual-hash index over a panel corpus.
+
+    Stage C2's retrieval prefilter. Deliberately not FAISS: that indexes dense
+    embedding vectors and earns its keep past ~100k items, whereas this is
+    64-bit integers where a linear scan beats the index build.
+    """
+    _bootstrap(None, None, log_level, log_format)
+
+    from sciforensics.scan import build_index, query_index
+
+    if query is not None:
+        if not out.is_file():
+            _err.print(f"[red]error:[/] no index at {out}; build one first")
+            raise typer.Exit(1)
+        index = json.loads(out.read_text(encoding="utf-8"))
+        hits = query_index(index, query, hamming_max=hamming_max, k=top_k)
+        if not hits:
+            _out.print("[green]No corpus entry within the distance gate.[/]")
+            return
+        table = Table(header_style="bold")
+        table.add_column("distance", justify="right")
+        table.add_column("panel")
+        for name, distance in hits:
+            table.add_row(str(distance), name)
+        _out.print(table)
+        return
+
+    images = sorted(
+        path
+        for path in corpus.rglob("*")
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
+    )
+    if not images:
+        _err.print(f"[red]error:[/] no images under {corpus}")
+        raise typer.Exit(1)
+
+    index = build_index(images)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(index, indent=2), encoding="utf-8")
+    _out.print(f"Indexed [bold]{len(index)}[/] of {len(images)} images")
+    _out.print(f"[bold]Index:[/] {out}")
+
+
 @app.command(name="bench")
 def bench_cmd(
     inputs: Path = typer.Option(
