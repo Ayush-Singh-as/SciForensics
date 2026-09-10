@@ -1,0 +1,341 @@
+/* Forensic report styling.
+ *
+ * Print-first: this sheet has to produce a defensible PDF through WeasyPrint
+ * *and* read well in a browser, so layout uses block/table flow rather than
+ * grid or flex gaps that WeasyPrint renders inconsistently.
+ *
+ * Bug 7's fix is structural rather than a tweak. The prototype wrote the verdict
+ * with cv2.putText onto a fixed 420px canvas and the last line landed at
+ * baseline y=415, so "scientific imagery" was cut in half in every report ever
+ * produced. Here prose lives in flowed HTML with no fixed height anywhere in the
+ * text path: it cannot clip, at any length, in any language.
+ */
+
+@page {
+  size: A4;
+  margin: 16mm 14mm 18mm 14mm;
+
+  @bottom-left {
+    content: "SciForensics — automated screening. Findings require expert confirmation.";
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 7pt;
+    color: #6b7280;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    font-size: 7pt;
+    color: #6b7280;
+  }
+}
+
+:root {
+  --ink: #16191d;
+  --muted: #6b7280;
+  --line: #e3e6ea;
+  --bg-soft: #f7f8fa;
+
+  /* Evidence semantics. Blue/amber rather than green/red: these carry the
+   * verdict, and red-green is the most common colour-vision deficiency. */
+  --verified: #1a7f5a;
+  --rejected: #b45309;
+  --alert: #b91c1c;
+  --indicative: #6b7280;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0;
+  /* Never justify a forensic document: rivers in ragged scientific terms make
+   * numbers harder to scan. */
+  text-align: left;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0 0 0.4em;
+  /* A heading orphaned at the foot of a page separates a finding from its
+   * evidence, which is exactly the wrong place to break a forensic report. */
+  break-after: avoid;
+}
+
+h1 {
+  font-size: 17pt;
+  letter-spacing: -0.01em;
+}
+h2 {
+  font-size: 11.5pt;
+  margin-top: 1.6em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--line);
+}
+h3 {
+  font-size: 9.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-top: 1.2em;
+}
+
+p {
+  margin: 0 0 0.7em;
+  /* Widow/orphan control: a single trailing line of a caveat on the next page
+   * reads as though it belonged to the following section. */
+  orphans: 2;
+  widows: 2;
+}
+
+code,
+.mono {
+  font-family: "JetBrains Mono", "Cascadia Mono", ui-monospace, monospace;
+  font-size: 8pt;
+  /* SHA-256 digests have no break opportunities and would otherwise overflow
+   * the page box -- the same class of failure as bug 7, in a different place. */
+  word-break: break-all;
+}
+
+/* ---------------------------------------------------------------- masthead */
+.masthead {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 0.7em;
+  margin-bottom: 1.4em;
+}
+
+.masthead .wordmark {
+  font-size: 8pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.masthead .subjects {
+  font-size: 8.5pt;
+  color: var(--muted);
+  margin-top: 0.2em;
+}
+
+/* ----------------------------------------------------------------- verdict */
+.verdict {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--indicative);
+  background: var(--bg-soft);
+  padding: 0.85em 1em;
+  margin-bottom: 0.5em;
+  break-inside: avoid;
+}
+
+.verdict.is-alert {
+  border-left-color: var(--alert);
+}
+.verdict.is-suspicious {
+  border-left-color: var(--rejected);
+}
+.verdict.is-clean {
+  border-left-color: var(--verified);
+}
+
+.verdict .headline {
+  font-size: 13pt;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.verdict .score {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* The uncalibrated caveat is part of the claim, not a footnote to it: a bare
+ * 0.87 presented as a probability is the same overclaiming the prototype's
+ * hard-coded verdict strings committed. */
+.caveat {
+  font-size: 8pt;
+  color: var(--muted);
+  margin-top: 0.4em;
+}
+
+.notes {
+  margin: 0.6em 0 0;
+  padding-left: 1.1em;
+}
+.notes li {
+  font-size: 8.5pt;
+  margin-bottom: 0.2em;
+}
+
+/* ------------------------------------------------------------------ tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0 1em;
+  font-size: 8.5pt;
+}
+
+th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 7.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding: 0.35em 0.6em 0.35em 0;
+}
+
+td {
+  padding: 0.35em 0.6em 0.35em 0;
+  border-bottom: 1px solid #f0f2f4;
+  vertical-align: top;
+}
+
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  padding-right: 0;
+}
+
+tr {
+  break-inside: avoid;
+}
+
+.kv td:first-child {
+  color: var(--muted);
+  width: 34%;
+}
+
+/* ----------------------------------------------------------- contributions */
+/* A signed bar chart in pure CSS: no JS, no image, so it survives PDF export.
+ * Each row is a table cell with a centre line; the bar grows left for evidence
+ * against reuse and right for evidence in favour. */
+.contrib .bar-cell {
+  width: 42%;
+  padding-right: 0;
+}
+
+.bar-track {
+  position: relative;
+  height: 9px;
+  background: #eef0f3;
+  border-radius: 1px;
+}
+
+.bar-track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: #c8ccd2;
+}
+
+.bar {
+  position: absolute;
+  top: 0;
+  height: 9px;
+  border-radius: 1px;
+}
+
+.bar.pos {
+  left: 50%;
+  background: var(--alert);
+}
+.bar.neg {
+  right: 50%;
+  background: var(--verified);
+}
+
+/* ---------------------------------------------------------------- overlays */
+figure {
+  margin: 0 0 1.1em;
+  break-inside: avoid;
+}
+
+figure img {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  display: block;
+}
+
+figcaption {
+  font-size: 8pt;
+  color: var(--muted);
+  margin-top: 0.35em;
+  line-height: 1.45;
+}
+
+/* Trust is encoded in the caption's left rule, so the reader can tell an
+ * indicative heatmap from verified geometry without reading the prose. */
+figcaption.trust-indicative {
+  border-left: 2px solid var(--indicative);
+  padding-left: 0.55em;
+}
+figcaption.trust-verified {
+  border-left: 2px solid var(--verified);
+  padding-left: 0.55em;
+}
+figcaption.trust-rejected {
+  border-left: 2px solid var(--rejected);
+  padding-left: 0.55em;
+}
+
+.pair {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 8px 0;
+  margin-left: -8px;
+}
+.pair td {
+  width: 50%;
+  border: none;
+  padding: 0;
+}
+
+/* -------------------------------------------------------------------- misc */
+.badge {
+  display: inline-block;
+  font-size: 7pt;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.15em 0.45em;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+.badge.ok {
+  color: var(--verified);
+}
+.badge.no {
+  color: var(--rejected);
+}
+
+.audit {
+  font-size: 7.5pt;
+  color: var(--muted);
+}
+
+.page-break {
+  break-before: page;
+}
+
+footer.disclaimer {
+  margin-top: 1.6em;
+  padding-top: 0.7em;
+  border-top: 1px solid var(--line);
+  font-size: 7.5pt;
+  color: var(--muted);
+}

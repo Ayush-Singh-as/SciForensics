@@ -1,0 +1,269 @@
+{#
+  Forensic comparison report.
+
+  Ordering is deliberate and is the argument the document makes: verdict, then
+  the caveats attached to it, then the evidence it was derived from, then the
+  audit trail that lets someone reproduce it. A reader who stops after the first
+  block has the finding *and* its limits; a reader who continues can check the
+  work. Evidence never appears before the caveat that qualifies it.
+
+  Every number here is rendered from the ScanResult -- the template computes no
+  forensic quantity of its own, so a figure in the PDF can always be traced to a
+  field in the JSON.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ title }}</title>
+<style>{{ css }}</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wordmark">SciForensics · Image Integrity Report</div>
+  <h1>{{ title }}</h1>
+  <div class="subjects mono">{{ result.left.path.name }} &nbsp;↔&nbsp; {{ result.right.path.name }}</div>
+</header>
+
+{# ------------------------------------------------------------- the finding #}
+<section class="verdict {{ verdict_class }}">
+  <div class="headline">{{ result.verdict.label }}</div>
+  <div>
+    Score <span class="score">{{ "%.3f"|format(result.confidence) }}</span>
+    {%- if result.geometry and result.geometry.verified %}
+      · <span class="badge ok">geometry verified</span>
+    {%- elif result.geometry %}
+      · <span class="badge no">geometry {{ result.geometry.rejection_reason.value|replace("_", " ") }}</span>
+    {%- endif %}
+  </div>
+
+  {#
+    Shown whenever no calibrator is fitted, which is every run until stage B5.
+    Not optional and not collapsible: the score is monotone, not a probability,
+    and a reader who takes 0.87 for an 87% chance has been misled by the report
+    rather than by the model.
+  #}
+  {% if not result.calibrated %}
+  <p class="caveat">
+    This score is a <strong>monotone ranking value, not a calibrated
+    probability</strong>. No calibrator has been fitted, so it orders pairs by
+    strength of evidence but does not estimate a likelihood. It must not be read
+    as “{{ "%.0f"|format(result.confidence * 100) }}% chance of manipulation”.
+  </p>
+  {% endif %}
+
+  {% if result.notes %}
+  <ul class="notes">
+    {% for note in result.notes %}<li>{{ note }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+{% if result.warnings %}
+<section>
+  <h3>Operational warnings</h3>
+  <ul class="notes">
+    {% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{# ---------------------------------------------------------------- overlays #}
+{% set matches = overlays.get('matches') %}
+{% if matches %}
+<h2>Correspondence evidence</h2>
+<figure>
+  <img src="{{ matches.href }}" alt="Correspondences between the two images">
+  <figcaption class="trust-{{ matches.trust }}">{{ matches.caption }}</figcaption>
+</figure>
+{% endif %}
+
+{% set attr_l = overlays.get('attribution_left') %}
+{% set attr_r = overlays.get('attribution_right') %}
+{% if attr_l or attr_r %}
+<h2>Embedding attribution</h2>
+<table class="pair"><tr>
+  {% for panel in [attr_l, attr_r] %}
+  <td>
+    {% if panel %}
+    <figure>
+      <img src="{{ panel.href }}" alt="Attribution heatmap">
+      <figcaption class="trust-{{ panel.trust }}">{{ panel.caption }}</figcaption>
+    </figure>
+    {% endif %}
+  </td>
+  {% endfor %}
+</tr></table>
+{% endif %}
+
+{# ------------------------------------------------------------ measurements #}
+<h2>Measurements</h2>
+
+<h3>Global embedding</h3>
+<table class="kv">
+  <tr><td>L1 distance</td><td class="num">{{ "%.4f"|format(g.distance) }}</td></tr>
+  <tr><td>Decision threshold</td><td class="num">{{ "%.2f"|format(g.distance_threshold) }}</td></tr>
+  <tr><td>Similarity</td><td class="num">{{ "%.4f"|format(g.similarity) }}</td></tr>
+  <tr><td>Embedding dimensions</td><td class="num">{{ g.embedding_dim }}</td></tr>
+  <tr><td>Local stage</td><td>{{ "triggered" if g.triggered_local else "not triggered" }}</td></tr>
+</table>
+
+{% if result.matches %}
+<h3>Keypoints and matching</h3>
+{#
+  Rendered as a funnel because the funnel is the finding. The prototype reported
+  231 "good matches" and 121 "inliers" on a pair whose two sides held 2,000 and
+  12 keypoints -- every match landing on at most 12 distinct points. Showing raw
+  → ratio → mutual-NN alongside the distinct counts is what makes that visible
+  instead of flattering.
+#}
+<table>
+  <tr><th>Stage</th><th class="num">Count</th><th>Note</th></tr>
+  <tr><td>Candidate pairs</td><td class="num">{{ m.raw }}</td><td></td></tr>
+  <tr><td>Passed ratio test</td><td class="num">{{ m.ratio_passed }}</td><td>Lowe ratio {{ "%.2f"|format(m.ratio) }}</td></tr>
+  <tr><td>Mutual nearest neighbour</td><td class="num">{{ m.good }}</td><td>{{ "enforced" if m.mutual_nn else "not enforced" }}</td></tr>
+  <tr>
+    <td>Distinct keypoints used</td>
+    <td class="num">{{ m.distinct_left }} / {{ m.distinct_right }}</td>
+    <td>
+      {% if m.is_injective %}One-to-one; no many-to-one collapse.
+      {% else %}<strong>Not injective</strong> — matches collapse onto fewer distinct points.{% endif %}
+    </td>
+  </tr>
+  {% if result.keypoints %}
+  <tr><td>Keypoints detected</td><td class="num">{{ k.left }} / {{ k.right }}</td><td>{{ k.detector }}</td></tr>
+  {% endif %}
+</table>
+{% endif %}
+
+{% if result.geometry %}
+<h3>Geometric verification</h3>
+<table class="kv">
+  <tr>
+    <td>Outcome</td>
+    <td>
+      {% if geo.verified %}<span class="badge ok">verified</span> via {{ geo.method }}
+      {% else %}<span class="badge no">refused</span> via {{ geo.method }}{% endif %}
+    </td>
+  </tr>
+  {% if not geo.verified %}
+  {# The named gate, in prose. "Not verified" and "inliers collapsed onto too
+     few distinct keypoints" are different findings, and the second is the one
+     that distinguishes this tool from the prototype it replaces. #}
+  <tr><td>Reason</td><td>{{ geo.rejection_reason.explanation }}</td></tr>
+  {% endif %}
+  <tr><td>Inliers</td><td class="num">{{ geo.inlier_count }} ({{ "%.2f"|format(geo.inlier_ratio) }} of matches)</td></tr>
+  <tr><td>Distinct inlier keypoints</td><td class="num">{{ geo.distinct_inliers }}</td></tr>
+  {% if geo.reproj_rms is not none %}
+  <tr><td>Reprojection RMS</td><td class="num">{{ "%.2f"|format(geo.reproj_rms) }} px</td></tr>
+  {% endif %}
+  <tr><td>Inlier spread</td><td class="num">{{ "%.3f"|format(geo.inlier_spread) }} of diagonal</td></tr>
+  <tr><td>Matched area</td><td class="num">{{ "%.3f"|format(geo.matched_area_fraction) }}</td></tr>
+  {% if geo.condition_number is not none %}
+  <tr><td>Condition number</td><td class="num">{{ "%.1f"|format(geo.condition_number) }}</td></tr>
+  {% endif %}
+</table>
+
+{% if geo.transform %}
+{#
+  Bugs 2 and 3 are read off this table. `flip` was unreachable in the prototype
+  (a similarity transform's determinant is a²+b², always positive, yet the code
+  tested det < 0), so a vertically mirrored image reported "Flip detected: no"
+  for every input it ever saw. `model` is shown because `flip` is only
+  observable at all under the full 6-DOF fit.
+#}
+<h3>Recovered transform</h3>
+<table class="kv">
+  <tr><td>Rotation</td><td class="num">{{ "%+.2f"|format(t.rotation_deg) }}°</td></tr>
+  <tr><td>Scale</td><td class="num">{{ "%.4f"|format(t.scale) }}</td></tr>
+  {% if t.anisotropic %}
+  <tr><td>Scale (x, y)</td><td class="num">{{ "%.3f"|format(t.scale_x) }}, {{ "%.3f"|format(t.scale_y) }}</td></tr>
+  {% endif %}
+  <tr>
+    <td>Reflection</td>
+    <td>{% if t.flip %}<strong>Present</strong> — content is mirrored{% else %}None{% endif %}</td>
+  </tr>
+  {% if t.sheared %}
+  <tr><td>Shear</td><td class="num">{{ "%+.2f"|format(t.shear_deg) }}°</td></tr>
+  {% endif %}
+  <tr><td>Translation</td><td class="num">{{ "%.1f"|format(t.translation[0]) }}, {{ "%.1f"|format(t.translation[1]) }} px</td></tr>
+  <tr><td>Model</td><td>{{ t.model }} ({{ "6-DOF" if t.model == "full" else "4-DOF" }})</td></tr>
+</table>
+{% endif %}
+{% endif %}
+
+{# ----------------------------------------------------------- contributions #}
+{% if result.contributions %}
+<h2>What drove the score</h2>
+<p class="caveat">
+  Signed contributions to the fused log-odds. Bars right (red) push toward
+  “manipulated”, left (green) away from it. Weights are currently hand-set
+  rather than fitted, which is why the score above is labelled uncalibrated.
+</p>
+<table class="contrib">
+  <tr><th>Evidence</th><th class="num">Value</th><th class="num">Log-odds</th><th class="bar-cell"></th></tr>
+  {% for c in contributions %}
+  <tr>
+    <td>{{ c.description or c.name }}</td>
+    <td class="num">{{ "%.3f"|format(c.value) }}</td>
+    <td class="num">{{ "%+.2f"|format(c.contribution) }}</td>
+    <td class="bar-cell">
+      <div class="bar-track">
+        <div class="bar {{ 'pos' if c.contribution >= 0 else 'neg' }}"
+             style="width: {{ c.width }}%"></div>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{# ------------------------------------------------------------------- audit #}
+{% if audit %}
+<h2>Audit trail</h2>
+<p class="caveat">
+  Everything needed to reproduce this report. The input digests identify the
+  exact bytes analysed; the config hash and tool version fix the parameters.
+</p>
+<table class="kv audit">
+  {% for image, side in [(result.left, "Left"), (result.right, "Right")] %}
+  <tr><td>{{ side }} file</td><td class="mono">{{ image.path }}</td></tr>
+  <tr><td>{{ side }} SHA-256</td><td class="mono">{{ image.sha256 }}</td></tr>
+  <tr>
+    <td>{{ side }} dimensions</td>
+    <td>
+      {{ image.width }}×{{ image.height }} px
+      {%- if image.was_downscaled %}
+        · analysed at {{ image.analysed_at[0] }}×{{ image.analysed_at[1] }}
+        (capped; reported coordinates are mapped back to full resolution)
+      {%- endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  {% for key, value in audit.items() %}
+  <tr><td>{{ key|replace("_", " ")|capitalize }}</td><td class="mono">{{ value }}</td></tr>
+  {% endfor %}
+  {% if result.timings %}
+  <tr>
+    <td>Stage timings</td>
+    <td class="mono">{% for stage, seconds in result.timings.items() %}{{ stage }} {{ "%.3f"|format(seconds) }}s{% if not loop.last %} · {% endif %}{% endfor %}</td>
+  </tr>
+  {% endif %}
+</table>
+{% endif %}
+
+<footer class="disclaimer">
+  <strong>Scope of this report.</strong> SciForensics performs automated
+  screening for image reuse and geometric manipulation. A finding is evidence
+  that two images share content under a transform — it is not a determination of
+  intent, misconduct, or fraud, and duplicate imagery has legitimate explanations
+  including shared controls and republished figures with proper attribution. Any
+  finding requires confirmation by a qualified reviewer with access to the
+  original data. Absence of a finding is not proof of originality: known failure
+  modes include heavy recompression, low-texture panels, and small reused
+  regions.
+</footer>
+
+</body>
+</html>

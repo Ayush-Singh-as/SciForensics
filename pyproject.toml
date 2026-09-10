@@ -132,6 +132,12 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ARG001", "ARG002"]
+# Typer builds click parameters by introspecting annotations, and this version
+# cannot see through `list[str] | None` to the element type -- it raises
+# "List types with complex sub-types are not currently supported" at import,
+# so every command fails to build. `Optional[list[str]]` is the spelling it
+# understands. UP045 is right about the modern idiom and wrong about this file.
+"src/sciforensics/cli.py" = ["UP045"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["sciforensics", "tests"]

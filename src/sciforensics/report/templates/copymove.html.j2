@@ -1,0 +1,167 @@
+{#
+  Copy-move (intra-image cloning) report.
+
+  A separate document from report.html.j2 rather than a shared template with the
+  right-hand image blanked: CMFD has one image and N region pairs, and a pair
+  template with half its fields empty invites the reader to wonder what is
+  missing.
+
+  The funnel that matters here is cluster_count -> len(regions). The prototype
+  fitted one global transform over all self-matches, so it could report at most
+  one region no matter how many clones were present, and its `regions` list was
+  misleading. Showing candidate clusters against verified regions is what makes
+  the multi-region capability legible and the rejections honest.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ title }}</title>
+<style>{{ css }}</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wordmark">SciForensics · Copy-Move Analysis</div>
+  <h1>{{ title }}</h1>
+  <div class="subjects mono">{{ result.image.path.name }}</div>
+</header>
+
+<section class="verdict {{ verdict_class }}">
+  <div class="headline">{{ result.summary_line }}</div>
+  <div>
+    Score <span class="score">{{ "%.3f"|format(result.confidence) }}</span>
+    {%- if ev.detected %} · <span class="badge ok">{{ ev.regions|length }} region(s) verified</span>
+    {%- else %} · <span class="badge no">no clone survived verification</span>{% endif %}
+  </div>
+
+  {% if not result.calibrated %}
+  <p class="caveat">
+    This score is a <strong>monotone ranking value, not a calibrated
+    probability</strong>. No calibrator has been fitted, so it orders findings by
+    strength of evidence but does not estimate a likelihood.
+  </p>
+  {% endif %}
+
+  {% if result.notes %}
+  <ul class="notes">
+    {% for note in result.notes %}<li>{{ note }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+{% if result.warnings %}
+<section>
+  <h3>Operational warnings</h3>
+  <ul class="notes">
+    {% for warning in result.warnings %}<li>{{ warning }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% set clone = overlays.get('copymove') %}
+{% if clone %}
+<h2>Localisation</h2>
+<figure>
+  <img src="{{ clone.href }}" alt="Detected cloned regions">
+  <figcaption class="trust-{{ clone.trust }}">
+    {{ clone.caption }}
+    Paired boxes share a colour; the connecting line marks the displacement
+    between lobes. Copy-move is symmetric, so “source” and “target” are assigned
+    by a deterministic convention and carry no claim about which lobe was pasted.
+  </figcaption>
+</figure>
+{% endif %}
+
+<h2>Detection funnel</h2>
+<table>
+  <tr><th>Stage</th><th class="num">Count</th><th>Note</th></tr>
+  <tr><td>Keypoints</td><td class="num">{{ ev.keypoints }}</td><td></td></tr>
+  <tr><td>Self-matches</td><td class="num">{{ ev.self_matches }}</td><td>Mutual-NN, excluding trivial self-pairs</td></tr>
+  <tr><td>Candidate offset clusters</td><td class="num">{{ ev.cluster_count }}</td><td>DBSCAN over (dx, dy, log scale, angle)</td></tr>
+  <tr>
+    <td>Verified regions</td>
+    <td class="num">{{ ev.regions|length }}</td>
+    <td>
+      {% if ev.cluster_count > ev.regions|length %}
+        {{ ev.cluster_count - ev.regions|length }} cluster(s) failed per-region geometric verification.
+      {% else %}Every candidate cluster held up under per-region estimation.{% endif %}
+    </td>
+  </tr>
+</table>
+
+{% if ev.regions %}
+<h2>Regions</h2>
+<p class="caveat">Coordinates are in original-image pixels.</p>
+<table>
+  <tr>
+    <th>#</th><th>Source (x, y, w, h)</th><th>Target (x, y, w, h)</th>
+    <th class="num">Offset</th><th class="num">Rotation</th><th class="num">Scale</th>
+    <th>Mirrored</th><th class="num">Inliers</th><th class="num">Area</th>
+  </tr>
+  {% for r in ev.regions %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td class="mono">{{ r.source_box[0] }}, {{ r.source_box[1] }}, {{ r.source_box[2] }}, {{ r.source_box[3] }}</td>
+    <td class="mono">{{ r.target_box[0] }}, {{ r.target_box[1] }}, {{ r.target_box[2] }}, {{ r.target_box[3] }}</td>
+    <td class="num">{{ "%.0f"|format(r.offset[0]) }}, {{ "%.0f"|format(r.offset[1]) }}</td>
+    <td class="num">{{ "%+.1f"|format(r.rotation_deg) }}°</td>
+    <td class="num">{{ "%.3f"|format(r.scale) }}</td>
+    <td>{{ "yes" if r.flip else "no" }}</td>
+    <td class="num">{{ r.inlier_count }}</td>
+    <td class="num">{{ r.area_px }} px²</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if result.contributions %}
+<h2>What drove the score</h2>
+<table class="contrib">
+  <tr><th>Evidence</th><th class="num">Value</th><th class="num">Log-odds</th><th class="bar-cell"></th></tr>
+  {% for c in contributions %}
+  <tr>
+    <td>{{ c.description or c.name }}</td>
+    <td class="num">{{ "%.3f"|format(c.value) }}</td>
+    <td class="num">{{ "%+.2f"|format(c.contribution) }}</td>
+    <td class="bar-cell">
+      <div class="bar-track">
+        <div class="bar {{ 'pos' if c.contribution >= 0 else 'neg' }}" style="width: {{ c.width }}%"></div>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if audit %}
+<h2>Audit trail</h2>
+<table class="kv audit">
+  <tr><td>File</td><td class="mono">{{ result.image.path }}</td></tr>
+  <tr><td>SHA-256</td><td class="mono">{{ result.image.sha256 }}</td></tr>
+  <tr>
+    <td>Dimensions</td>
+    <td>
+      {{ result.image.width }}×{{ result.image.height }} px
+      {%- if result.image.was_downscaled %}
+        · analysed at {{ result.image.analysed_at[0] }}×{{ result.image.analysed_at[1] }} (capped)
+      {%- endif %}
+    </td>
+  </tr>
+  {% for key, value in audit.items() %}
+  <tr><td>{{ key|replace("_", " ")|capitalize }}</td><td class="mono">{{ value }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<footer class="disclaimer">
+  <strong>Scope of this report.</strong> Copy-move detection identifies regions
+  within a single image that share content under a geometric transform. Cloned
+  regions have legitimate explanations — repeated background, tiled acquisition,
+  and legitimate duplication of controls among them. A finding is evidence for a
+  reviewer to examine, not a determination of misconduct, and absence of a
+  finding is not proof of integrity.
+</footer>
+
+</body>
+</html>
