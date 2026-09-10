@@ -145,10 +145,25 @@ export interface CopyMoveResult {
   timings: Record<string, number>;
 }
 
+/**
+ * One rendered overlay, as the API describes it.
+ *
+ * `caption` and `trust` are computed server-side in `report/overlays.py` and
+ * reused by both the PDF template and this client, so the demo cannot label an
+ * overlay differently from the report of the same analysis.
+ */
+export interface OverlayRef {
+  name: string;
+  /** Filename for the asset route. */
+  file: string;
+  caption: string;
+  trust: "raw" | "indicative" | "verified" | "rejected";
+}
+
 export interface JobPayload<T> {
   job_id: string;
   result: T;
-  overlays: string[];
+  overlays: OverlayRef[];
   warnings: string[];
 }
 

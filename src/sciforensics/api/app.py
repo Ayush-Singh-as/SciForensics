@@ -190,9 +190,21 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
         render = render_copy_move if isinstance(analysis, CopyMoveAnalysis) else render_pair
         written = render(analysis, settings, directory, formats=("html", "json"))
+        # Descriptors, not bare filenames: the caption and trust level were
+        # already computed in `overlays.py` for the PDF, and sending them keeps
+        # the web demo from labelling an overlay differently from the report of
+        # the same analysis. `file` is the asset-route filename.
         return {
             "result": analysis.result.model_dump(mode="json"),
-            "overlays": [p.name for p in written.images],
+            "overlays": [
+                {
+                    "name": name,
+                    "file": Path(descriptor["href"]).name,
+                    "caption": descriptor["caption"],
+                    "trust": descriptor["trust"],
+                }
+                for name, descriptor in written.overlays.items()
+            ],
             "warnings": list(written.warnings),
         }
 

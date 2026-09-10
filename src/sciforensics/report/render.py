@@ -20,7 +20,7 @@ directory is self-contained and can be zipped or served as-is.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,11 @@ class Written:
     pdf: Path | None = None
     json_path: Path | None = None
     images: tuple[Path, ...] = ()
+    #: ``name -> {href, caption, trust}`` for each overlay written. The captions
+    #: and trust levels are computed once, in ``overlays.py``, and reused by the
+    #: HTML template *and* the API -- so the web demo cannot label an overlay
+    #: differently from the PDF of the same analysis.
+    overlays: dict[str, dict[str, Any]] = field(default_factory=dict)
     warnings: tuple[str, ...] = ()
 
     @property
@@ -339,6 +344,7 @@ def render_pair(
         pdf=pdf_path,
         json_path=json_path,
         images=images,
+        overlays=overlay_map,
         warnings=tuple(warnings),
     )
 
@@ -421,5 +427,6 @@ def render_copy_move(
         pdf=pdf_path,
         json_path=json_path,
         images=tuple(images) + tuple(mask_paths),
+        overlays=overlay_map,
         warnings=tuple(warnings),
     )

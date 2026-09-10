@@ -28,6 +28,7 @@ import {
   type CopyMoveResult,
   type Example,
   type JobPayload,
+  type OverlayRef,
   type ScanResult,
   type ServerConfig,
   assetUrl,
@@ -58,6 +59,7 @@ export default function Page() {
   const [bands, setBands] = useState<Bands | null>(null);
   const [examples, setExamples] = useState<Example[]>([]);
   const [overlay, setOverlay] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState(false);
 
   // Server config is the source of truth for the band defaults, so the sliders
   // start where the backend actually sits rather than at numbers duplicated in
@@ -103,8 +105,13 @@ export default function Page() {
     return bandFor(job.payload.result.confidence, bands);
   }, [job, bands]);
 
-  const overlays = job?.payload.overlays ?? [];
-  const active = overlay ?? overlays.find((name) => name.startsWith("matches")) ?? overlays[0];
+  const overlays: OverlayRef[] = job?.payload.overlays ?? [];
+  // Default to the correspondence overlay: it is the one carrying geometric
+  // evidence, so it is what a reader should see first.
+  const active =
+    overlays.find((o) => o.name === overlay) ??
+    overlays.find((o) => o.name === "matches") ??
+    overlays[0];
 
   return (
     <div className="shell">
@@ -167,21 +174,44 @@ export default function Page() {
                 <header>
                   <h2>Evidence</h2>
                   <div className="toggles" style={{ marginLeft: "auto" }}>
-                    {overlays.map((name) => (
+                    {overlays.map((item) => (
                       <button
-                        key={name}
+                        key={item.name}
                         className="toggle"
-                        aria-pressed={active === name}
-                        onClick={() => setOverlay(name)}
+                        aria-pressed={active?.name === item.name}
+                        onClick={() => {
+                          setOverlay(item.name);
+                          setZoomed(false);
+                        }}
                       >
-                        {name.replace(/\.png$/, "").replace(/_/g, " ")}
+                        {item.name.replace(/_/g, " ")}
                       </button>
                     ))}
                   </div>
                 </header>
                 <div className="body">
-                  <figure className="viewer" style={{ margin: 0 }}>
-                    <img src={assetUrl(job.payload.job_id, active)} alt="Forensic overlay" />
+                  {/*
+                    Height-capped by default so the whole overlay -- both panels
+                    of a side-by-side match canvas -- is visible without
+                    scrolling. Clicking restores native resolution for close
+                    inspection. Reading a forensic overlay should not require
+                    hunting for its other half.
+                  */}
+                  <figure
+                    className="viewer"
+                    data-zoom={zoomed}
+                    style={{ margin: 0 }}
+                    onClick={() => setZoomed(!zoomed)}
+                    title={zoomed ? "Click to fit" : "Click to zoom to full resolution"}
+                  >
+                    <img
+                      src={assetUrl(job.payload.job_id, active.file)}
+                      alt={active.caption}
+                    />
+                    <figcaption data-trust={active.trust}>
+                      {active.caption}
+                      {zoomed ? " · Click to fit." : " · Click to view at full resolution."}
+                    </figcaption>
                   </figure>
                 </div>
               </div>

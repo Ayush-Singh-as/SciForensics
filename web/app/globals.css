@@ -210,6 +210,11 @@ code,
 .stage {
   padding: 20px;
   min-width: 0;
+  /* Overlays are written at `report.thumbnail_max_px` (900) wide. Letting the
+   * column grow past that upscales every asset and, with `pixelated`, makes it
+   * look worse the bigger the monitor. Capping here keeps the evidence at or
+   * below native resolution. */
+  max-width: 1040px;
 }
 
 .rail {
@@ -487,12 +492,45 @@ code,
   background-position: 0 0, 8px 8px;
 }
 
+/* The image is bounded by the *viewport*, not by the column width.
+ *
+ * `width: 100%; height: auto` alone made the overlay unusable: the stage has no
+ * max-width, so on a wide monitor a 900px asset was stretched past native size
+ * and the side-by-side `matches` canvas ran hundreds of pixels below the fold.
+ * Reading a forensic overlay should never require scrolling to find its other
+ * half -- the whole point is comparing the two panels at once.
+ *
+ * `max-height: 62vh` keeps any overlay, at any aspect, inside one screen
+ * alongside its caption. `object-fit: contain` letterboxes rather than crops,
+ * because cropping a forensic image would silently hide evidence. Click-to-zoom
+ * (`[data-zoom="true"]`) restores full resolution for close inspection. */
 .viewer img {
   display: block;
   width: 100%;
   height: auto;
-  /* Never smooth a forensic image on upscale: interpolation invents detail. */
+  max-height: 62vh;
+  object-fit: contain;
+  /* Never smooth a forensic image on upscale: interpolation invents detail.
+   * `auto` while downscaled -- pixelated shrinking is just aliasing, and this
+   * image is now usually being *reduced* to fit the height cap. */
+  image-rendering: auto;
+  cursor: zoom-in;
+  transition: max-height var(--t);
+}
+
+/* Zoomed: native resolution, nearest-neighbour, scroll to inspect. This is the
+ * mode where `pixelated` is correct -- an upscaled forensic image must not be
+ * interpolated, or the renderer invents detail that was never measured. */
+.viewer[data-zoom="true"] {
+  max-height: 82vh;
+  overflow: auto;
+}
+.viewer[data-zoom="true"] img {
+  max-height: none;
+  width: auto;
+  max-width: none;
   image-rendering: pixelated;
+  cursor: zoom-out;
 }
 
 .viewer figcaption {
