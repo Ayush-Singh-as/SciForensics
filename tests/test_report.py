@@ -24,7 +24,7 @@ import pytest
 
 pytest.importorskip("jinja2")
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined  # noqa: E402
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 TEMPLATES = Path(__file__).resolve().parents[1] / "src" / "sciforensics" / "report" / "templates"
 
@@ -59,9 +59,7 @@ def _image(name: str) -> types.SimpleNamespace:
 
 def _scan_result() -> types.SimpleNamespace:
     """A worst case: refused geometry, a flip, notes, and warnings all present."""
-    reason = types.SimpleNamespace(
-        value="degenerate_correspondences", explanation=LONG_EXPLANATION
-    )
+    reason = types.SimpleNamespace(value="degenerate_correspondences", explanation=LONG_EXPLANATION)
     geometry = types.SimpleNamespace(
         verified=False,
         rejection_reason=reason,
@@ -101,7 +99,21 @@ def _scan_result() -> types.SimpleNamespace:
             embedding_dim=128,
             triggered_local=True,
         ),
-        keypoints=types.SimpleNamespace(left=2000, right=12, detector="orb"),
+        # Mirrors KeypointEvidence field-for-field, including the `asymmetry`
+        # property the template consults. The 12-vs-2000 split is the real
+        # bug-4 shape: the sides were not comparably sampled, so any match
+        # count between them is suspect.
+        keypoints=types.SimpleNamespace(
+            detector="orb",
+            detected_left=2000,
+            detected_right=2000,
+            kept_left=2000,
+            kept_right=12,
+            roi_abandoned_left=False,
+            roi_abandoned_right=True,
+            enhancement_scale=4.0,
+            asymmetry=2000 / 12,
+        ),
         matches=types.SimpleNamespace(
             raw=980,
             ratio_passed=231,
@@ -176,6 +188,20 @@ def test_non_injective_matching_is_flagged() -> None:
     assert "Not injective" in _render_pair_html()
 
 
+def test_sampling_asymmetry_is_surfaced() -> None:
+    """Bug 4's other half: the *cause* of the phantom inliers must be visible.
+
+    The prototype reported neither the post-ROI counts nor their ratio, so a
+    pair sampled 2000-vs-12 looked identical to one sampled evenly. It also
+    read these fields as `k.left`/`k.right`, which do not exist on
+    `KeypointEvidence` -- mypy caught that before it reached a report.
+    """
+    html = _render_pair_html()
+    assert "Keypoints kept" in html
+    assert "Sampling asymmetry" in html
+    assert "ROI restriction dropped" in html
+
+
 def test_missing_optional_overlays_do_not_break_rendering() -> None:
     """StrictUndefined is on, so an absent overlay key must be handled, not assumed.
 
@@ -187,7 +213,7 @@ def test_missing_optional_overlays_do_not_break_rendering() -> None:
 
 
 def test_copymove_template_renders_without_regions() -> None:
-    """"No clones found" must be distinguishable from "the detector was off"."""
+    """ "No clones found" must be distinguishable from "the detector was off"."""
     result = types.SimpleNamespace(
         image=_image("base_cells_1.png"),
         summary_line="No cloned regions found",
@@ -202,15 +228,19 @@ def test_copymove_template_renders_without_regions() -> None:
         contributions=(),
         timings={},
     )
-    html = _env().get_template("copymove.html.j2").render(
-        title="Copy-Move Analysis",
-        css=(TEMPLATES / "base.css").read_text(encoding="utf-8"),
-        result=result,
-        ev=result.evidence,
-        overlays={},
-        contributions=[],
-        audit=None,
-        verdict_class="is-clean",
+    html = (
+        _env()
+        .get_template("copymove.html.j2")
+        .render(
+            title="Copy-Move Analysis",
+            css=(TEMPLATES / "base.css").read_text(encoding="utf-8"),
+            result=result,
+            ev=result.evidence,
+            overlays={},
+            contributions=[],
+            audit=None,
+            verdict_class="is-clean",
+        )
     )
     assert "No cloned regions found" in html
     # The funnel gap: 3 candidate clusters, 0 verified regions.
@@ -225,3 +255,42 @@ def test_stylesheet_has_no_fixed_height_in_the_text_path() -> None:
     # The only heights in the sheet belong to bar graphics, never to text
     # containers. `max-height` on a text block would reintroduce the bug.
     assert "max-height" not in css
+
+
+def test_pdf_backends_report_a_reason_rather_than_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing PDF backend must downgrade, not fail the command.
+
+    The regression: WeasyPrint resolves Pango/cairo/gobject through ctypes at
+    *import* time, so a package that is installed but whose native libraries are
+    absent raises ``OSError``, not ``ImportError``. The original handler caught
+    only ``ImportError``, which turned the documented graceful degradation into
+    a hard `report rendering failed` on every Windows host without the GTK
+    runtime -- even though the HTML had already been written successfully.
+    """
+    from sciforensics.report import render as render_mod
+
+    def no_playwright(*_: object, **__: object) -> str:
+        return "playwright is not installed."
+
+    def no_weasyprint(*_: object, **__: object) -> str:
+        return "WeasyPrint is installed but its native libraries are missing (x)."
+
+    monkeypatch.setattr(render_mod, "_pdf_via_playwright", no_playwright)
+    monkeypatch.setattr(render_mod, "_pdf_via_weasyprint", no_weasyprint)
+
+    problem = render_mod._render_pdf("<html></html>", Path("unused.pdf"), Path.cwd())
+    assert problem is not None
+    # The caller shows this to a human, so it has to say what to do instead.
+    assert "HTML report was written instead" in problem
+    assert "playwright" in problem
+
+
+def test_pdf_succeeds_when_a_backend_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    """First backend to succeed wins and nothing is reported."""
+    from sciforensics.report import render as render_mod
+
+    def works(*_: object, **__: object) -> None:
+        return None
+
+    monkeypatch.setattr(render_mod, "_pdf_via_playwright", works)
+    assert render_mod._render_pdf("<html></html>", Path("unused.pdf"), Path.cwd()) is None

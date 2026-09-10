@@ -52,6 +52,19 @@ export interface GeometryEvidence {
   matched_area_fraction: number;
 }
 
+export interface KeypointEvidence {
+  detector: string;
+  detected_left: number;
+  detected_right: number;
+  /** Counts after the difference-of-Gaussians ROI filter -- what matching saw. */
+  kept_left: number;
+  kept_right: number;
+  /** ROI restriction was dropped to keep a side above the per-side floor. */
+  roi_abandoned_left: boolean;
+  roi_abandoned_right: boolean;
+  enhancement_scale: number;
+}
+
 export interface MatchEvidence {
   matcher: string;
   raw: number;
@@ -91,7 +104,7 @@ export interface ScanResult {
     triggered_local: boolean;
     embedding_dim: number;
   };
-  keypoints: { left: number; right: number; detector: string } | null;
+  keypoints: KeypointEvidence | null;
   matches: MatchEvidence | null;
   geometry: GeometryEvidence | null;
   verdict: Verdict;

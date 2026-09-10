@@ -201,7 +201,7 @@ def attribution_overlay(
 def keypoint_overlay(image: LoadedImage, detection: Detection, *, side: str) -> Overlay:
     canvas = _to_bgr(image.bgr)
     for point in detection.points:
-        x, y = int(round(float(point[0]))), int(round(float(point[1])))
+        x, y = round(float(point[0])), round(float(point[1]))
         cv2.circle(canvas, (x, y), 3, _SOURCE, 1, cv2.LINE_AA)
     return Overlay(
         name=f"keypoints_{side}",
@@ -246,15 +246,15 @@ def match_overlay(
         dst = correspondences.dst[index]
         is_inlier = bool(mask[index])
         colour = _INLIER if is_inlier else _OUTLIER
-        p0 = (int(round(float(src[0]))), int(round(float(src[1]))))
-        p1 = (int(round(float(dst[0]))) + offset, int(round(float(dst[1]))))
+        p0 = (round(float(src[0])), round(float(src[1])))
+        p1 = (round(float(dst[0])) + offset, round(float(dst[1])))
         if cfg.draw_match_lines:
             cv2.line(canvas, p0, p1, colour, 1, cv2.LINE_AA)
         cv2.circle(canvas, p0, 3, colour, -1, cv2.LINE_AA)
         cv2.circle(canvas, p1, 3, colour, -1, cv2.LINE_AA)
 
-    if cfg.draw_inlier_hull and verified and verification is not None:
-        _draw_hull(canvas, verification, correspondences, mask, offset)
+    if cfg.draw_inlier_hull and verified:
+        _draw_hull(canvas, correspondences, mask, offset)
 
     inliers = int(mask.sum())
     if verified:
@@ -277,7 +277,6 @@ def match_overlay(
 
 def _draw_hull(
     canvas: np.ndarray,
-    verification: Verification,
     correspondences: Correspondences,
     mask: np.ndarray,
     offset: int,
@@ -288,6 +287,10 @@ def _draw_hull(
     through the homography: warping would show where the model says the region
     goes, which is a claim about the model. The hull of the surviving points is a
     claim about the data.
+
+    Takes only the mask, not the ``Verification`` — the caller has already
+    decided the fit was verified, and passing the evidence object as well would
+    imply this function re-checks it.
     """
     if not mask.any():
         return

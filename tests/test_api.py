@@ -20,10 +20,10 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from sciforensics.api import create_app  # noqa: E402
-from sciforensics.config import Settings, load_config  # noqa: E402
+from sciforensics.api.app import create_app
+from sciforensics.config import Settings, load_config
 
 
 @pytest.fixture(scope="module")

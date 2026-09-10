@@ -232,7 +232,19 @@ def _render_scan(result: ScanResult, *, verbose: bool) -> None:
 
     if result.keypoints is not None:
         k = result.keypoints
-        table.add_row("Keypoints", f"{k.left} vs {k.right}")
+        table.add_row(
+            "Keypoints detected", f"{k.detected_left} vs {k.detected_right} ({k.detector})"
+        )
+        # Post-ROI counts are the ones matching actually saw. `asymmetry` exists
+        # on the model precisely for bug 4: a ratio far from 1.0 means the two
+        # sides were not comparably sampled, so any match count between them is
+        # suspect. The prototype's 12-vs-2000 pair reported neither number.
+        roi = f"{k.kept_left} vs {k.kept_right}"
+        if k.roi_abandoned_left or k.roi_abandoned_right:
+            roi += "  [yellow](ROI dropped)[/]"
+        table.add_row("Keypoints kept", roi)
+        if k.asymmetry > 4.0:
+            table.add_row("Sampling asymmetry", f"[red]{k.asymmetry:.1f}x[/]")
 
     if result.matches is not None:
         m = result.matches
@@ -352,7 +364,7 @@ def _write_report(analysis: Any, cfg: Settings, directory: Path, formats: list[s
     from sciforensics.pipeline import CopyMoveAnalysis
 
     try:
-        from sciforensics.report import render_copy_move, render_pair
+        from sciforensics.report.render import render_copy_move, render_pair
     except ImportError as exc:  # pragma: no cover - environment-dependent
         _err.print(
             f"[red]error:[/] the report extra is not installed ({exc}).\n"
@@ -418,9 +430,7 @@ def compare(
     cfg = _bootstrap(config, set_, log_level, log_format)
     pipeline = _build_pipeline(cfg, device)
     try:
-        analysis = pipeline.compare(
-            left, right, force_local=force_local, attribution=attribution
-        )
+        analysis = pipeline.compare(left, right, force_local=force_local, attribution=attribution)
     except Exception as exc:
         raise _fail(exc, "compare failed") from exc
 
@@ -526,7 +536,9 @@ def serve(
         )
         return
 
-    from sciforensics.api import create_app
+    # From the concrete module, not the package's lazy __getattr__ re-export:
+    # that returns `object`, so the call would be untyped here.
+    from sciforensics.api.app import create_app
 
     uvicorn.run(create_app(cfg), host=bind_host, port=bind_port, log_level=log_level.lower())
 

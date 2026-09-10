@@ -46,7 +46,20 @@ dependencies = [
 # Learned local matching (DISK / SuperPoint / LightGlue / LoFTR) and the DINOv2 baseline.
 match = ["kornia>=0.7.2", "timm>=1.0"]
 # HTML/PDF forensic reports.
-report = ["Jinja2>=3.1", "weasyprint>=61.0", "ImageHash>=4.3"]
+#
+# Two PDF backends, because neither installs everywhere. `playwright` prints
+# through headless Chromium -- the engine `base.css` was written against, and it
+# needs no system libraries (only `playwright install chromium`). `weasyprint`
+# is pure-Python layout but resolves Pango/cairo/gobject via ctypes at import,
+# so it dies on any host without the GTK runtime, which is the default state on
+# Windows. `render.py` tries Chromium first and falls back, so a missing backend
+# downgrades to HTML with a warning rather than failing the command.
+report = [
+    "Jinja2>=3.1",
+    "playwright>=1.44",
+    "weasyprint>=61.0",
+    "ImageHash>=4.3",
+]
 # FastAPI service backing the web demo.
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "python-multipart>=0.0.9"]
 # Training the embedding model.

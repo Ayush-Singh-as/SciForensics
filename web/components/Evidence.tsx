@@ -19,6 +19,7 @@ import {
   type Bands,
   type Contribution,
   type GeometryEvidence,
+  type KeypointEvidence,
   type MatchEvidence,
   VERDICT_LABEL,
   type Verdict as VerdictName,
@@ -102,7 +103,7 @@ export function MatchFunnel({
   keypoints,
 }: {
   matches: MatchEvidence;
-  keypoints: { left: number; right: number; detector: string } | null;
+  keypoints: KeypointEvidence | null;
 }) {
   const injective =
     matches.good === matches.distinct_left && matches.good === matches.distinct_right;
@@ -134,7 +135,7 @@ export function MatchFunnel({
         >
           <span>Keypoints ({keypoints.detector})</span>
           <span className="num">
-            {keypoints.left.toLocaleString()} / {keypoints.right.toLocaleString()}
+            {keypoints.kept_left.toLocaleString()} / {keypoints.kept_right.toLocaleString()}
           </span>
         </div>
       )}

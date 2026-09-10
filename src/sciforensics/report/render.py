@@ -143,22 +143,99 @@ def _write_overlays(
 
 
 def _render_pdf(html: str, destination: Path, base_url: Path) -> str | None:
-    """Write a PDF, or return why it could not be written.
+    """Write a PDF, trying each available backend, or return why none worked.
 
-    ``base_url`` must be the output directory so WeasyPrint resolves the
-    relative image hrefs.
+    Two backends, tried in order, because neither is universally installable:
+
+    ``playwright`` (preferred)
+        Prints through headless Chromium, so what lands in the PDF is what a
+        browser renders -- the same engine ``base.css`` was written against,
+        including ``@page`` rules and ``break-inside``. Needs no system
+        libraries, only a downloaded browser.
+    ``weasyprint``
+        Pure-Python layout, but resolves Pango/cairo/gobject through ctypes at
+        import, so it fails on any machine without the GTK runtime.
+
+    Ordering is by *likelihood of working*, not preference in the abstract: a
+    report the reader can open beats a stack trace about `libgobject-2.0-0`.
+    """
+    problems: list[str] = []
+
+    played = _pdf_via_playwright(html, destination, base_url)
+    if played is None:
+        return None
+    problems.append(played)
+
+    weasy = _pdf_via_weasyprint(html, destination, base_url)
+    if weasy is None:
+        return None
+    problems.append(weasy)
+
+    return (
+        "PDF skipped; the HTML report was written instead and prints to PDF from any browser. "
+        + " ".join(problems)
+    )
+
+
+def _pdf_via_playwright(html: str, destination: Path, base_url: Path) -> str | None:
+    """Print via headless Chromium. Returns ``None`` on success."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return "playwright is not installed."
+
+    # The HTML references its assets relatively, so it has to be served from a
+    # real location for Chromium to resolve them; a temp file beside the assets
+    # is simpler and more predictable than spinning up an HTTP server.
+    staged = base_url / ".print.html"
+    try:
+        staged.write_text(html, encoding="utf-8")
+        with sync_playwright() as play:
+            browser = play.chromium.launch()
+            try:
+                page = browser.new_page()
+                page.goto(staged.resolve().as_uri(), wait_until="load")
+                page.pdf(
+                    path=str(destination),
+                    format="A4",
+                    # The stylesheet owns the margins via `@page`; setting them
+                    # here as well would apply them twice.
+                    prefer_css_page_size=True,
+                    print_background=True,
+                )
+            finally:
+                browser.close()
+    except Exception as exc:
+        return f"Chromium print failed: {exc}."
+    finally:
+        staged.unlink(missing_ok=True)
+    return None
+
+
+def _pdf_via_weasyprint(html: str, destination: Path, base_url: Path) -> str | None:
+    """Render with WeasyPrint. Returns ``None`` on success.
+
+    ``base_url`` must be the output directory so the relative image hrefs
+    resolve.
     """
     try:
-        from weasyprint import HTML  # type: ignore[import-untyped]
+        from weasyprint import HTML
     except ImportError:
+        return "WeasyPrint is not installed."
+    except OSError as exc:
+        # WeasyPrint imports fine but resolves Pango/cairo/gobject through
+        # ctypes at import time, so a *present* package with absent native
+        # libraries raises OSError, not ImportError -- the usual state on
+        # Windows and in slim images. Catching only ImportError turned a
+        # documented graceful degradation into a hard command failure.
         return (
-            "PDF skipped: WeasyPrint is not installed (pip install 'sciforensics[report]'). "
-            "The HTML report was written instead and prints to PDF from any browser."
+            f"WeasyPrint is installed but its native libraries are missing ({exc}); "
+            "install the GTK runtime, or libpango/libcairo in Docker."
         )
     try:
         HTML(string=html, base_url=str(base_url)).write_pdf(str(destination))
     except Exception as exc:  # pragma: no cover - native library failures
-        return f"PDF rendering failed: {exc}. The HTML report was written instead."
+        return f"WeasyPrint render failed: {exc}."
     return None
 
 
@@ -216,9 +293,7 @@ def render_pair(
 
     if "json" in wanted:
         json_path = directory / "report.json"
-        json_path.write_text(
-            json.dumps(result.model_dump(mode="json"), indent=2), encoding="utf-8"
-        )
+        json_path.write_text(json.dumps(result.model_dump(mode="json"), indent=2), encoding="utf-8")
 
     if "html" in wanted or "pdf" in wanted:
         env = _environment()
@@ -312,9 +387,7 @@ def render_copy_move(
 
     if "json" in wanted:
         json_path = directory / "report.json"
-        json_path.write_text(
-            json.dumps(result.model_dump(mode="json"), indent=2), encoding="utf-8"
-        )
+        json_path.write_text(json.dumps(result.model_dump(mode="json"), indent=2), encoding="utf-8")
 
     if "html" in wanted or "pdf" in wanted:
         env = _environment()

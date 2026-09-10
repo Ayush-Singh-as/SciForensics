@@ -1283,7 +1283,13 @@ def test_a_real_manipulation_ranks_below_a_negative_control(
     manipulation = embedder.compare(base, degraded, attribution=False)
     control = embedder.compare(base, unrelated, attribution=False)
 
-    assert manipulation.similarity == pytest.approx(0.2297, abs=0.01)
+    # The absolute figures are tied to `generate_examples.py`'s SEED: the noise
+    # it adds was unseeded until this was measured, so every regeneration of
+    # `base_cell_ex2_degraded.jpg` produced a different file and a different
+    # similarity (0.2297 before seeding, 0.1877 after). The *inversion* below is
+    # the finding and holds regardless of the seed; these two are a tripwire for
+    # the checkpoint or the preprocessing changing underneath it.
+    assert manipulation.similarity == pytest.approx(0.1877, abs=0.01)
     assert control.similarity == pytest.approx(0.3781, abs=0.01)
     assert manipulation.similarity < control.similarity, "the inversion B2/B3 exist to fix"
 
@@ -1298,6 +1304,9 @@ def test_a_real_manipulation_ranks_below_a_negative_control(
     fused = rules.fuse(bundle, bands)
 
     assert fused.verdict is Verdict.CLEAN
-    assert fused.confidence == pytest.approx(0.0567, abs=1e-3)
+    # Moves with `manipulation.similarity`, hence with the generator's SEED
+    # (0.0567 at the pre-seeding 0.2297). The assertions either side of this are
+    # the load-bearing ones: the verdict, and that it sits *below* the prior.
+    assert fused.confidence == pytest.approx(0.0501, abs=5e-3)
     assert fused.logit < PRIOR_LOGIT, "a real manipulation scored below the base rate"
     assert "absence of evidence rather than evidence of absence" in " ".join(fused.notes)

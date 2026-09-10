@@ -58,11 +58,11 @@ Stage **B** (defensible science), Stage **C** (deployable tool).
 | Phase | Scope | State |
 |---|---|---|
 | **A0** Repackage | pyproject, `src/sciforensics/`, config, logging, seeding, weights fetch, LICENSE, `.gitattributes`, **CLI** | ✅ **done** |
-| **A1** Tests + CI | 337 pytest tests, 3-job GitHub Actions matrix | ✅ **done** |
-| **A2** Fix bugs 1–13 | 13 of 14 fixed | ✅ — only **bug 1** remains (needs B1's data loader) |
-| **A3** Real reports | Jinja2 HTML → WeasyPrint PDF, raster overlays | ✅ **done** — **bug 7 closed**; PDF degrades to HTML without WeasyPrint |
-| **A4** Web demo | FastAPI + Next.js 16, docker-compose | ✅ **done** — API + UI build and run; analysis paths need torch |
-| **B0–B6** Science | Data hygiene, retrain, LightGlue, multi-region CMFD eval, calibration, benchmarks | ❌ **not started** (`fusion/calibrate.py` scaffolded, unfitted) |
+| **A1** Tests + CI | **424 tests passing, 0 skipped**; ruff + mypy + pre-commit all green | ✅ **done, verified** |
+| **A2** Fix bugs 1–13 | 13 of 14 fixed and **empirically verified against real images** | ✅ — only **bug 1** remains (needs B1's data loader) |
+| **A3** Real reports | Jinja2 HTML → PDF (Chromium *or* WeasyPrint), raster overlays | ✅ **done** — **bug 7 closed and PDF verified**: 2-page PDF, extractable text, full disclaimer intact |
+| **A4** Web demo | FastAPI + Next.js 16, docker-compose | ✅ **done** — API + UI build and run; end-to-end analysis verified via CLI |
+| **B0–B6** Science | Data hygiene, retrain, LightGlue, multi-region CMFD eval, calibration, benchmarks | 🔄 **in progress** (`fusion/calibrate.py` scaffolded, unfitted) |
 | **C1–C4** Product | PDF→panels, FAISS retrieval, hardening, docs | ❌ **not started** |
 
 **~14,500 lines** landed in commit `bcb29bc` ("Fixed some bugs") — the entire `src/sciforensics/`
@@ -90,38 +90,25 @@ BioFors out entirely, write `DATA_CARD.md`). B1 gates B2's retrain. The highest-
 overall is **B6's negative controls** — precision is still unmeasured, so no false-positive rate
 exists yet.
 
-### Environment note (important, cost me a cycle)
+### Environment (now fully installed)
 
-The local interpreter is **Python 3.12.10** and the package is **not installed**.
-`torch`, `pydantic-settings`, and `scikit-learn` are all **missing**, so:
-
-- `import sciforensics` → `ModuleNotFoundError`
-- `pytest` → fails at `conftest.py` import
-
-`pip install -e ".[dev]"` was **declined by the user**, so the **302 inherited tests remain
-unverified locally** — they are well-formed on inspection and CI is configured to run them, but
-*no one has watched them pass on this machine.* Do not claim the full suite is green.
-
-**Workaround that does work:** `export PYTHONPATH=src` runs the package straight from the
-source tree. Every module was written so the heavy stack is imported *lazily*, so a large part of
-the codebase is exercisable without torch:
+Python **3.12.10**, package installed editable with `[dev,report,api]`. torch **2.14.0+cpu**,
+opencv **5.0.0**, ruff, mypy, playwright+Chromium. `models/weights.pth` verifies against
+`weights.EXPECTED_SHA256` (`befec5b8…`), so real analysis runs.
 
 ```bash
-export PYTHONPATH=src
-python -m pytest tests/test_cli.py tests/test_api.py tests/test_report.py -q   # 37 passed
-python -m sciforensics.cli config --json
-python -m sciforensics.cli version
+pytest -q                      # 424 passed, 0 skipped, ~26s
+ruff check . && ruff format --check .
+mypy                           # 43 files, clean
+pre-commit run --all-files     # every hook passes
 ```
 
-**Verified locally (37 tests, ~1.2 s):** `test_cli.py` 16 · `test_api.py` 12 · `test_report.py` 9.
-Also verified by hand: overlay rendering against the real `inputs/mountains*.jpg` (both the
-rejected and verified paths), the FastAPI app serving `/healthz`, `/v1/config`, `/v1/examples`
-with correct CORS preflight, the Next.js production build, and a `hatchling` wheel containing the
-Jinja templates. The frontend has **0 npm vulnerabilities** (Next was upgraded 15.1.6 → 16.3.4
-for CVE-2025-66478).
+**PDF needs a backend.** WeasyPrint is installed but its native GTK libraries are not (winget and
+choco both failed on permissions here), so **Chromium via playwright is the working backend** and
+is now the *first* one tried. `python -m playwright install chromium` is the only extra step.
 
-`ruff` and `mypy` are also absent, so the new code is **lint-verified by hand** against the rules
-`pyproject.toml` selects, not by running the gate.
+**Weights are not auto-resolved yet.** `RELEASE_URL` is `None` until the artifact is published, so
+pass `--set global_match.weights=models/weights.pth` on the CLI for now.
 
 ---
 
@@ -364,6 +351,46 @@ come from the upgraded detectors). C needs a stable Stage B.
 
 Effort split: **A ≈ 40%, B ≈ 35%, C ≈ 25%**. Stage A alone yields a correct, tested, packaged tool
 with a live demo — the highest-leverage slice to stop at.
+
+---
+
+## 8b. Stage A verification — measured results (2026-09-10)
+
+Run with the real checkpoint. **These are the numbers, not expectations.**
+
+| Case | Prototype | Now | Reading |
+|---|---|---|---|
+| `mountains` vs `mountains_manipulated` | `scale 0.000`, translation 1635 px, 121 phantom inliers, "Strong evidence" | `rot -180.00°`, **`scale 0.9999`**, RMS **0.46 px**, 377/397 inliers, **verified** | Bug 3 fixed. Ground truth checked by correlation: `rot180` (+0.066) beats both single-axis mirrors, and 180° flips *both* axes so `det=+1` — **`flip=no` is correct here and the plan's `flip=True` expectation was wrong about this pair.** |
+| `base_cell` vs `base_cells_2` (**negative control**) | would report matches | **1 good match**, `too_few_matches`, `clean` | **Bug 4 fixed.** The exact 90-vs-2000 asymmetry that manufactured the phantom inliers now yields nothing, and the CLI prints `Sampling asymmetry 22.2x`. |
+| Reflection decode (unit) | `flip` **unreachable** (`det = a²+b² > 0` always) | `det = -1.440`, **`flip=True`**, `rot -135.00°`, `scale 1.2000` | **Bug 2 fixed and reachable.** Verified at the geometry layer because ORB descriptors are not mirror-invariant, so no real *image* pair can demonstrate it — which is B3's remit. |
+| `base_cells_2_ex3_copymove` (CMFD) | could only ever report **one** region | **1 region**: source `(60,44) 131×134`, clone `(380,299)`, `rot +0.1°`, `scale 1.002`, 42 inliers; funnel **6 clusters → 1 verified** | **Bug 6 fixed.** Generator copied a 128 px patch (64,51)→(384,307) — recovered within a few px. |
+| Report PDF | verdict clipped mid-word on a 420 px canvas | **2-page PDF**, 7 images, extractable text, ends `"…absence of a finding is not proof of integrity."` | **Bug 7 closed.** The full trailing prose survives. |
+
+**CMFD needs tuning per image, and this is a real finding.** The shipped `copy_move.nn_ratio: 0.8`
+and `cluster.min_samples: 6` miss small clones: an *exact* copy has near-identical descriptors, so
+Lowe's ratio `d1/d2 → 1` and the strict test rejects the very matches wanted (0.8 → 32 self-matches,
+0.9 → 258). Detection needed `nn_ratio=0.9` **and** `min_samples=4`. It succeeded only on the
+largest patch (128 px on a 512×640 panel); the 40 px clone on the 519×162 strip produced 6 candidate
+clusters, **0 verified** — reported honestly as such. Retuning these defaults belongs to **B4**.
+
+**Reproducibility bug found and fixed:** `generate_examples.py` added `np.random.normal` noise
+**unseeded**, so every regeneration produced a different asset and any test asserting a similarity
+against it broke on rebuild — which is exactly what happened to
+`test_a_real_manipulation_ranks_below_a_negative_control`. Now seeded (`SEED = 1234`) and verified
+byte-identical across runs. The test's hard-coded values were rebased and annotated as
+seed-dependent; the *finding* they guard is seed-independent and still holds.
+
+**The inversion that motivates Stage B**, now measured on the seeded asset:
+
+| Pair | Embedding similarity |
+|---|---|
+| `base_cell` vs its own JPEG-q25+noise copy (**a true positive**) | **0.1877** |
+| `base_cell` vs `base_cells_2` (**unrelated — a negative control**) | **0.3781** |
+
+A real manipulation embeds **further away** than an unrelated image. No fusion weight fixes this:
+any embedding weight large enough to promote the true positive also promotes the control. It is a
+fact about the checkpoint, and it is precisely why **B1/B2 (retrain) and B3 (learned matching)**
+exist.
 
 ---
 

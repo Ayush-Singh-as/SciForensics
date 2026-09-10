@@ -132,7 +132,23 @@
     </td>
   </tr>
   {% if result.keypoints %}
-  <tr><td>Keypoints detected</td><td class="num">{{ k.left }} / {{ k.right }}</td><td>{{ k.detector }}</td></tr>
+  <tr><td>Keypoints detected</td><td class="num">{{ k.detected_left }} / {{ k.detected_right }}</td><td>{{ k.detector }}</td></tr>
+  {# The counts matching actually saw, after the DoG ROI filter. `asymmetry` far
+     from 1.0 means the two sides were not comparably sampled -- the prototype's
+     12-vs-2000 pair, whose 231 "good matches" the funnel above now exposes. #}
+  <tr>
+    <td>Keypoints kept (post-ROI)</td>
+    <td class="num">{{ k.kept_left }} / {{ k.kept_right }}</td>
+    <td>
+      {% if k.roi_abandoned_left or k.roi_abandoned_right %}
+        ROI restriction dropped to stay above the per-side floor.
+      {% endif %}
+      {% if k.asymmetry > 4.0 %}
+        <strong>Sampling asymmetry {{ "%.1f"|format(k.asymmetry) }}x</strong> — match counts
+        between sides sampled this unevenly should be read with suspicion.
+      {% endif %}
+    </td>
+  </tr>
   {% endif %}
 </table>
 {% endif %}

@@ -78,7 +78,8 @@ def unrepeated_texture(size: tuple[int, int] = (320, 400), *, seed: int = SEED) 
     """
     height, width = size
     generator = np.random.default_rng(seed)
-    field = cv2.GaussianBlur(generator.normal(128.0, 70.0, (height, width)).astype(np.float32), (0, 0), 1.5)
+    noise = generator.normal(128.0, 70.0, (height, width)).astype(np.float32)
+    field = cv2.GaussianBlur(noise, (0, 0), 1.5)
     low, high = float(field.min()), float(field.max())
     # Rescale to a fixed dynamic range so the DoG and Otsu thresholds downstream
     # see the same contrast regardless of what the draw happened to produce.

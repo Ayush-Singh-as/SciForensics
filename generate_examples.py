@@ -5,6 +5,14 @@ from PIL import Image, ImageEnhance
 
 INPUT_DIR = Path('inputs')
 
+# The degradation example adds Gaussian noise. Unseeded, every regeneration
+# produced a *different* file, so any test asserting a similarity against it
+# broke the moment the asset was rebuilt -- which is exactly what happened to
+# test_a_real_manipulation_ranks_below_a_negative_control. The pipeline itself
+# seeds via `sciforensics.runtime.seed_everything`; the asset generator has to
+# do the same or the fixtures are not reproducible.
+SEED = 1234
+
 def generate_examples_for_image(base_path: Path):
     print(f"\nProcessing: {base_path.name}")
     base_img = cv2.imread(str(base_path))
@@ -29,7 +37,7 @@ def generate_examples_for_image(base_path: Path):
     img_pil = Image.open(base_path).convert('RGB')
     
     arr = np.array(img_pil, dtype=np.float32)
-    noise = np.random.normal(0, 20, arr.shape).astype(np.float32)
+    noise = np.random.default_rng(SEED).normal(0, 20, arr.shape).astype(np.float32)
     noisy = np.clip(arr + noise, 0, 255).astype(np.uint8)
     img_noisy = Image.fromarray(noisy)
     

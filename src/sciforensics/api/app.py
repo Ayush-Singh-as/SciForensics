@@ -185,8 +185,8 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
     def _render(analysis: Any, directory: Path) -> dict[str, Any]:
         """Write overlays and return the evidence payload the frontend consumes."""
-        from sciforensics.report import render_copy_move, render_pair
         from sciforensics.pipeline import CopyMoveAnalysis
+        from sciforensics.report.render import render_copy_move, render_pair
 
         render = render_copy_move if isinstance(analysis, CopyMoveAnalysis) else render_pair
         written = render(analysis, settings, directory, formats=("html", "json"))
@@ -246,7 +246,10 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             {
                 "id": "cells-unrelated",
                 "label": "Unrelated cell panels",
-                "note": "Negative control: different source images, so a finding here is a false positive.",
+                "note": (
+                    "Negative control: different source images, so a finding "
+                    "here is a false positive."
+                ),
                 "kind": "negative",
                 "left": "inputs/base_cell.png",
                 "right": "inputs/base_cells_2.png",
@@ -330,7 +333,9 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         raise HTTPException(404, "no report was rendered for this job")
 
     @app.exception_handler(HTTPException)
-    def _http_error(request: Request, exc: HTTPException) -> JSONResponse:
+    def _http_error(request: Request, exc: HTTPException) -> JSONResponse:  # noqa: ARG001
+        # `request` is unused but required: Starlette calls every exception
+        # handler with (request, exc), so dropping it is a TypeError at runtime.
         # Uniform error shape, so the frontend has one thing to parse.
         return JSONResponse({"error": exc.detail, "status": exc.status_code}, exc.status_code)
 
