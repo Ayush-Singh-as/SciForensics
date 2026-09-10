@@ -70,7 +70,9 @@ Stage **B** (defensible science), Stage **C** (deployable tool).
 | **B5** Calibration | Fit logistic/isotonic on the `calib` split | ⏳ blocked on B2/B4 |
 | **C1** PDF→panels | PyMuPDF extraction (lossless/render, provenance recorded) + gutter-projection panel splitting | ✅ **done** — verified against constructed layouts |
 | **C2** Retrieval | Dihedral-pHash prefilter + `scan`/`index` commands | ✅ **done** — planted duplicate caught at 100% coverage |
-| **C3–C4** Hardening, docs | Job queue, ONNX, mkdocs site, tech report | ❌ **not started** |
+| **C3** Hardening | TTL expiry, admission control (503+Retry-After), `/readyz`, `/metrics` | ✅ **done** — enforced limits that were previously config-only |
+| **C4** Docs | `MODEL_CARD.md` (failure modes), `DATA_CARD.md`, README quickstart | ✅ **done** |
+| **C3** remainder | ONNX/TorchScript export, signed PDFs, real job queue | ❌ deferred — need a deployment target to be worth building |
 
 **~14,500 lines** landed in commit `bcb29bc` ("Fixed some bugs") — the entire `src/sciforensics/`
 package, the test suite, CI, and config.
@@ -472,6 +474,53 @@ matcher problems.** Swapping ORB for a state-of-the-art learned matcher changed 
 failures are dominated by the **embedding**, which is the component trained on a set that was 82%
 segmentation masks (bug 1) — and which scores a true positive at 0.1877 against 0.3781 for an
 unrelated control. **B2 (retrain) is the critical path, not B3.**
+
+---
+
+## 8e. Stage C3/C4 — limits that were fiction (2026-09-10)
+
+`configs/default.yaml` declared `api.max_concurrent_jobs` and
+`api.job_ttl_seconds`. **Both were read by nothing.** The service advertised a
+concurrency bound and a retention policy it did not have — the same class of
+dishonesty the whole rebuild exists to remove, in the newest code.
+
+| Setting | Claimed | Actually did | Now |
+|---|---|---|---|
+| `max_concurrent_jobs: 4` | bounded concurrency | unbounded; every request queued on the pipeline lock until the client timed out — **indistinguishable from a hang** | admission semaphore → immediate **503 + `Retry-After`** |
+| `job_ttl_seconds: 3600` | results expire | never expired; job directories survived until the entry cap evicted them — **a slow disk leak** | TTL enforced, and the directory deleted with the record |
+
+Added `/readyz` (model loaded, jobs held, capacity) distinct from `/healthz`,
+which deliberately never touches the model — a healthcheck that ran an inference
+would mark the container unhealthy during a slow first request, exactly when it is
+working. `/metrics` is hand-rolled Prometheus text: four counters and a gauge do
+not justify a dependency.
+
+**Two bugs found while testing this work:**
+
+1. **`ttl_seconds=0` retained everything forever.** The cutoff used a strict `<`,
+   so a just-stored entry's timestamp equalled the cutoff and never expired — the
+   exact opposite of what the value reads as, and the first thing a test or a
+   cache-disabling deployment would set. Now `<=`.
+2. **The uniform error handler silently dropped `Retry-After`.** The header was
+   set at the raise site and discarded one layer later, so a client told to back
+   off had nothing to back off by. `exc.headers` is now forwarded.
+
+Also replaced a contrived capacity test that proved nothing: the semaphore is now
+published on `app.state`, so a test can occupy the slot and assert the real
+overload response instead of monkeypatching `threading` globally (which was also
+a typing violation).
+
+**C4 docs.** `docs/MODEL_CARD.md` leads with the failure modes rather than the
+metrics: the embedding ranks a true positive (0.1877) *below* an unrelated control
+(0.3781); reflection is 0/3 for both matchers; recompression is 1/3 and learned
+matching changed nothing. The README gained a current quickstart, and the legacy
+prototype documentation is collapsed behind a `<details>` block that names its own
+drift (`grad_loc.py` does not exist; "~1.2M parameters" against a real 8.8M).
+
+**Deferred, with reasons.** ONNX/TorchScript export, signed PDFs and a real job
+queue are C3 items not built: each needs a deployment target to be worth
+designing against, and the current store is marked with a `ponytail:` comment
+naming when to swap it for Redis.
 
 ---
 

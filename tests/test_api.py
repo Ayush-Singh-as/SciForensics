@@ -15,6 +15,7 @@ belong to ``test_pipeline.py``.
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 
@@ -124,3 +125,148 @@ def test_asset_route_confines_the_filename(client: TestClient, name: str) -> Non
     # never a file from outside the job directory.
     assert response.status_code in {307, 404}
     assert response.status_code != 200
+
+
+# ---------------------------------------------------------------------------
+# C3 -- limits that were configured but enforced by nothing
+# ---------------------------------------------------------------------------
+def test_readyz_distinguishes_alive_from_able_to_serve(client: TestClient) -> None:
+    """A container can be alive but unable to serve, and the difference matters.
+
+    `/healthz` deliberately never touches the model -- a healthcheck that ran an
+    inference would mark the container unhealthy during a slow first request,
+    exactly when it is working. `/readyz` is where load state belongs, so an
+    orchestrator can stop routing without restarting.
+    """
+    payload = client.get("/readyz").json()
+    assert payload["status"] in {"ready", "warming"}
+    assert "model_loaded" in payload
+    assert payload["capacity"] >= 1
+
+
+def test_metrics_are_prometheus_text(client: TestClient) -> None:
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+    body = response.text
+    for counter in (
+        "sciforensics_requests_total",
+        "sciforensics_rejected_total",
+        "sciforensics_failed_total",
+        "sciforensics_completed_total",
+        "sciforensics_jobs_held",
+    ):
+        assert f"# TYPE {counter}" in body, counter
+        assert f"\n{counter} " in f"\n{body}", counter
+
+
+def test_rejected_uploads_still_count_as_requests(client: TestClient) -> None:
+    """Metrics must reflect load, including work that was refused.
+
+    A counter that only advanced on success would under-report exactly when the
+    service is struggling.
+    """
+    before = int(
+        next(
+            line.split()[1]
+            for line in client.get("/metrics").text.splitlines()
+            if line.startswith("sciforensics_requests_total ")
+        )
+    )
+    client.post("/v1/cmfd", files={"image": ("x.png", b"nope", "image/png")})
+    after = int(
+        next(
+            line.split()[1]
+            for line in client.get("/metrics").text.splitlines()
+            if line.startswith("sciforensics_requests_total ")
+        )
+    )
+    assert after == before + 1
+
+
+def test_job_ttl_expires_records_and_removes_their_directories(tmp_path: Path) -> None:
+    """`api.job_ttl_seconds` existed in config and was read by nothing.
+
+    The API advertised a retention policy it did not have, and every job
+    directory survived until the entry cap evicted it -- a slow disk leak, not
+    an expiry. Both halves are asserted: the record goes, and so do the files.
+    """
+    from sciforensics.api.app import _Store
+
+    directory = tmp_path / "job"
+    directory.mkdir()
+    (directory / "overlay.png").write_bytes(b"pixels")
+
+    store = _Store(ttl_seconds=0.0)
+    store.put("abc", {"directory": str(directory)})
+
+    assert store.get("abc") is None, "an expired job must not be served"
+    assert not directory.exists(), "expiring a job must delete its files too"
+
+
+def test_job_within_ttl_is_retained(tmp_path: Path) -> None:
+    from sciforensics.api.app import _Store
+
+    directory = tmp_path / "fresh"
+    directory.mkdir()
+    store = _Store(ttl_seconds=3600.0)
+    store.put("abc", {"directory": str(directory)})
+
+    assert store.get("abc") is not None
+    assert directory.exists()
+
+
+def test_entry_cap_evicts_oldest_and_cleans_up(tmp_path: Path) -> None:
+    from sciforensics.api.app import _Store
+
+    store = _Store(max_entries=2, ttl_seconds=3600.0)
+    directories = []
+    for index in range(3):
+        directory = tmp_path / f"j{index}"
+        directory.mkdir()
+        directories.append(directory)
+        store.put(f"job{index}", {"directory": str(directory)})
+
+    assert store.get("job0") is None, "the oldest entry should have been evicted"
+    assert not directories[0].exists()
+    assert store.get("job2") is not None
+    assert len(store) == 2
+
+
+def test_capacity_overload_returns_503_rather_than_queueing() -> None:
+    """`api.max_concurrent_jobs` was configured and enforced by nothing.
+
+    The service accepted unbounded work and every request queued on the pipeline
+    lock until the client gave up -- indistinguishable from a hang. Overload must
+    produce an immediate 503 carrying `Retry-After`, which a client can act on.
+
+    Driven by occupying the app's own semaphore (published on `app.state`).
+    Racing real concurrent analyses would need a loaded model and would end up
+    testing the test's threading rather than the admission rule.
+    """
+    app = create_app(load_config(overrides=["api.max_concurrent_jobs=1"]))
+    client = TestClient(app, raise_server_exceptions=False)
+
+    assert app.state.admission.acquire(blocking=False) is True
+    try:
+        response = client.post("/v1/cmfd", files={"image": ("x.png", b"not an image", "image/png")})
+    finally:
+        app.state.admission.release()
+
+    assert response.status_code == 503, response.text
+    # The header was set at the raise site and silently dropped by the uniform
+    # error handler until `exc.headers` was forwarded.
+    assert response.headers.get("Retry-After") == "10"
+    assert "capacity" in response.json()["error"]
+
+
+def test_capacity_released_after_a_request() -> None:
+    """A refused-upload path must not leak its slot, or the service wedges."""
+    client = TestClient(
+        create_app(load_config(overrides=["api.max_concurrent_jobs=1"])),
+        raise_server_exceptions=False,
+    )
+    for _ in range(3):
+        response = client.post("/v1/cmfd", files={"image": ("x.png", b"not an image", "image/png")})
+        # 400, not 503: the slot from the previous call was returned.
+        assert response.status_code == 400, response.text

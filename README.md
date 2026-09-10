@@ -1,6 +1,147 @@
-# Robust Image Plagiarism and Manipulation Detection in Scientific Publications
+# SciForensics — Image Integrity Analysis for Scientific Publications
 
-## Overview
+Detects figure reuse and manipulation in scientific papers: the same blot, gel or
+micrograph republished after rotation, reflection, rescaling, recompression or
+partial region duplication.
+
+**Status:** `v0.2.0.dev0`. 515 tests green (505 + 10 learned-backend); `ruff`, `mypy`
+and `pre-commit` clean.
+All 14 audited correctness bugs fixed and verified against real images. Precision
+is measured against real negative controls for the first time.
+
+The design commitment that matters: **the pipeline is allowed to say "I do not
+know."** Geometry returns verified, refuted, *or* abstains with a named reason. A
+prototype that manufactures confident nonsense is worse than useless when a false
+accusation can end a career.
+
+---
+
+## Quickstart
+
+```bash
+pip install -e ".[dev,report,api,match]"
+python -m playwright install chromium        # PDF backend, no system libs needed
+```
+
+`models/weights.pth` is not yet published as a release asset, so point at it
+explicitly:
+
+```bash
+export SCIFORENSICS_GLOBAL_MATCH__WEIGHTS=models/weights.pth   # bash
+$env:SCIFORENSICS_GLOBAL_MATCH__WEIGHTS = "models/weights.pth" # PowerShell
+```
+
+### Compare two figures
+
+```bash
+sciforensics compare inputs/mountains.jpg inputs/mountains_manipulated.jpg -v
+#  Likely reused or manipulated - confidence 0.935 (uncalibrated score)
+#  Rotation -180.00 deg | Scale 0.9999 | Geometry verified | 377 inliers
+```
+
+### Search one figure for cloned regions
+
+```bash
+sciforensics cmfd inputs/base_cells_2_ex3_copymove.png   --set copy_move.nn_ratio=0.9 --set copy_move.cluster.min_samples=4
+#  1 cloned region localized - source (60,44) 131x134 -> clone (380,299)
+```
+
+### Audit a whole manuscript
+
+```bash
+sciforensics scan paper.pdf -o out/scan
+#  PDF -> figures -> panels -> every surviving pair, with coverage reported
+```
+
+### Write a report
+
+```bash
+sciforensics compare a.png b.png --report out/report -f pdf -f html -f json
+```
+
+### Measure it
+
+```bash
+sciforensics bench -b orb -b disk        # recall, FPR, precision, latency
+```
+
+### Web demo
+
+```bash
+sciforensics serve --port 8000           # terminal 1
+cd web && npm install && npm run dev     # terminal 2  -> http://localhost:3000
+```
+
+---
+
+## Measured performance
+
+19 cases, 16 positives and 3 genuine negative controls
+([benchmarks/RESULTS.md](benchmarks/RESULTS.md)):
+
+| Backend | Recall | FPR | Precision | Latency p50 |
+|---|---|---|---|---|
+| `orb+mutual_nn` (default) | **68.8%** | **0.0%** | **100.0%** | 0.30 s |
+| `disk+lightglue` | 62.5% | 0.0% | 100.0% | 8.85 s |
+
+**Read the caveats before quoting these.** Three controls is not a false-positive
+rate, the score is **not calibrated**, and there are documented failure modes —
+reflection is 0/3 and heavy recompression is 1/3. All of it is in
+[docs/MODEL_CARD.md](docs/MODEL_CARD.md).
+
+Learned matching (DISK+LightGlue) is implemented and measured **worse** than ORB,
+so ORB remains the default. That is a result, not an omission.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `compare` | Two figures: reuse and manipulation |
+| `cmfd` | One figure: cloned regions |
+| `scan` | A PDF: figures → panels → every pair |
+| `index` | Build/query a pHash corpus index |
+| `bench` | Recall, FPR, precision, latency |
+| `splits` | Frozen content-addressed dataset manifests |
+| `config` | The resolved configuration in effect |
+| `serve` | The HTTP API behind the web demo |
+| `version` | Version and provenance |
+
+Every threshold lives in [configs/default.yaml](configs/default.yaml) and nowhere
+else. `sciforensics config` prints what is actually in effect.
+
+## Documentation
+
+- [PROJECT_BIBLE.md](PROJECT_BIBLE.md) — what every file does, every bug, every
+  design decision, and the measured results
+- [docs/MODEL_CARD.md](docs/MODEL_CARD.md) — performance, **known failure modes**,
+  intended use
+- [docs/DATA_CARD.md](docs/DATA_CARD.md) — provenance, licensing, split policy,
+  and the 670-vs-30,131 mask discovery
+- [benchmarks/RESULTS.md](benchmarks/RESULTS.md) — generated, never hand-edited
+
+## Scope
+
+SciForensics performs **automated screening**. A finding is evidence that two
+images share content under a transform — not a determination of intent or
+misconduct. Duplicate imagery has legitimate explanations, including shared
+controls and properly attributed republication. Any finding requires confirmation
+by a qualified reviewer with access to the original data, and absence of a finding
+is not proof of originality.
+
+---
+
+<details>
+<summary><b>Legacy prototype documentation</b> (describes the pre-rebuild code in
+<code>src/global_matching/</code> and <code>src/local_matching/</code>)</summary>
+
+> **Superseded.** The sections below document the original prototype and are kept
+> because the audit in `implementation_plan.md` cites their line numbers as
+> evidence. They contain known drift — a `grad_loc.py` that does not exist, a
+> `data/test/bbbc038` path that does not, and "~1.2M parameters" against a real
+> **8.8M**. Use the quickstart above; treat everything below as a historical
+> record of what the prototype claimed.
+
+## Overview (legacy)
 
 The integrity of scientific publications relies heavily on the authenticity of reported data, particularly imagery. Existing image similarity systems often fall short when identifying subtle, intentional manipulations common in academic plagiarism—such as cropping, rotation, flipping, scaling, contrast/brightness adjustments, and partial region reuse.
 
@@ -638,3 +779,5 @@ The model is trained on the **Broad Bioimage Benchmark Collection BBBC038** data
 | `Pillow` | ≥8.0 | PIL-based custom augmentations (text, rect, erase) |
 | `matplotlib` | ≥3.3 | Visualization in test/evaluation scripts |
 | `tensorboard` | ≥2.4 | Training monitoring (loss/accuracy curves) |
+
+</details>
