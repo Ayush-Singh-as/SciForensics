@@ -369,11 +369,16 @@ def _blank(evidence: MatchEvidence) -> Correspondences:
     )
 
 
-def build_matcher(cfg: LocalMatchConfig, *, norm: int = cv2.NORM_HAMMING) -> Matcher:
+def build_matcher(
+    cfg: LocalMatchConfig, *, norm: int = cv2.NORM_HAMMING, device: str = "cpu"
+) -> Matcher:
     """Instantiate the configured matcher backend."""
     if cfg.matcher in {"mutual_nn", "bf"}:
         return BruteForceMatcher(cfg, norm=norm)
+    if cfg.matcher == "lightglue":
+        from sciforensics.local_match.learned import LightGlueMatcher
+
+        return LightGlueMatcher(cfg, device=device)
     raise NotImplementedError(
-        f"matcher {cfg.matcher!r} is not available yet (LightGlue lands in stage B3). "
-        "Use local_match.matcher=mutual_nn."
+        f"matcher {cfg.matcher!r} is not available yet. Use mutual_nn or lightglue."
     )

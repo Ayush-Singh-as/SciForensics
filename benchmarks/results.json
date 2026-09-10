@@ -1,0 +1,612 @@
+{
+  "reports": [
+    {
+      "backend": "orb+mutual_nn",
+      "audit": {
+        "tool_version": "0.2.0.dev0",
+        "config_fingerprint": "0308a02bdf1949d5ff5e68136d2718df3357d5f0fdd2b159f248a31e270bbc67",
+        "timestamp_utc": "2026-09-10T06:41:47+00:00",
+        "device": "cpu",
+        "git_commit": "c4a60fb2e2d8568f047da735a6919b4c34f9cdaa",
+        "git_dirty": true,
+        "python_version": "3.12.10",
+        "torch_version": "2.14.0+cpu",
+        "opencv_version": "5.0.0",
+        "weights_sha256": null,
+        "seed": 1234
+      },
+      "summary": {
+        "positives": 16,
+        "negatives": 3,
+        "recall": 0.6875,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall_by_manipulation": {
+          "ex1_affine": {
+            "detected": 0,
+            "total": 3
+          },
+          "ex2_degraded": {
+            "detected": 1,
+            "total": 3
+          },
+          "ex3_copymove": {
+            "detected": 3,
+            "total": 3
+          },
+          "ex4_exposure": {
+            "detected": 3,
+            "total": 3
+          },
+          "ex5_blackout": {
+            "detected": 3,
+            "total": 3
+          },
+          "known_pair": {
+            "detected": 1,
+            "total": 1
+          }
+        }
+      },
+      "cases": [
+        {
+          "label": "base_cell -> ex1_affine",
+          "positive": true,
+          "manipulation": "ex1_affine",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.02576486388955593,
+          "matches": 9,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 0.6972213999833912
+        },
+        {
+          "label": "base_cell -> ex2_degraded",
+          "positive": true,
+          "manipulation": "ex2_degraded",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.019137527019631943,
+          "matches": 4,
+          "correct_correspondences": 2,
+          "correspondence_precision": 0.5,
+          "rejection": "too_few_matches",
+          "seconds": 0.20768190000671893
+        },
+        {
+          "label": "base_cell -> ex3_copymove",
+          "positive": true,
+          "manipulation": "ex3_copymove",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9654738255886964,
+          "matches": 53,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 0.18362570006866008
+        },
+        {
+          "label": "base_cell -> ex4_exposure",
+          "positive": true,
+          "manipulation": "ex4_exposure",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9547083099854723,
+          "matches": 56,
+          "correct_correspondences": 56,
+          "correspondence_precision": 1.0,
+          "rejection": "",
+          "seconds": 0.17315110005438328
+        },
+        {
+          "label": "base_cell -> ex5_blackout",
+          "positive": true,
+          "manipulation": "ex5_blackout",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9699343335975057,
+          "matches": 68,
+          "correct_correspondences": 68,
+          "correspondence_precision": 1.0,
+          "rejection": "",
+          "seconds": 0.17223699996247888
+        },
+        {
+          "label": "base_cells_1 -> ex1_affine",
+          "positive": true,
+          "manipulation": "ex1_affine",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.03786062359871131,
+          "matches": 50,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 0.24623080005403608
+        },
+        {
+          "label": "base_cells_1 -> ex2_degraded",
+          "positive": true,
+          "manipulation": "ex2_degraded",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9683820850716575,
+          "matches": 110,
+          "correct_correspondences": 87,
+          "correspondence_precision": 0.7909090909090909,
+          "rejection": "",
+          "seconds": 0.29716640000697225
+        },
+        {
+          "label": "base_cells_1 -> ex3_copymove",
+          "positive": true,
+          "manipulation": "ex3_copymove",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.982399668255128,
+          "matches": 1886,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 0.29593820008449256
+        },
+        {
+          "label": "base_cells_1 -> ex4_exposure",
+          "positive": true,
+          "manipulation": "ex4_exposure",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.977653323462033,
+          "matches": 1302,
+          "correct_correspondences": 1301,
+          "correspondence_precision": 0.999231950844854,
+          "rejection": "",
+          "seconds": 0.2551454999484122
+        },
+        {
+          "label": "base_cells_1 -> ex5_blackout",
+          "positive": true,
+          "manipulation": "ex5_blackout",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9822955376322122,
+          "matches": 1772,
+          "correct_correspondences": 1772,
+          "correspondence_precision": 1.0,
+          "rejection": "",
+          "seconds": 0.2575287000508979
+        },
+        {
+          "label": "base_cells_2 -> ex1_affine",
+          "positive": true,
+          "manipulation": "ex1_affine",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.019793504987063688,
+          "matches": 44,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 0.5526378999929875
+        },
+        {
+          "label": "base_cells_2 -> ex2_degraded",
+          "positive": true,
+          "manipulation": "ex2_degraded",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.020306845900238575,
+          "matches": 33,
+          "correct_correspondences": 1,
+          "correspondence_precision": 0.030303030303030304,
+          "rejection": "too_few_inliers",
+          "seconds": 0.6712955000111833
+        },
+        {
+          "label": "base_cells_2 -> ex3_copymove",
+          "positive": true,
+          "manipulation": "ex3_copymove",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9815553617668079,
+          "matches": 1702,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 0.6431721999542788
+        },
+        {
+          "label": "base_cells_2 -> ex4_exposure",
+          "positive": true,
+          "manipulation": "ex4_exposure",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9776178966869429,
+          "matches": 587,
+          "correct_correspondences": 562,
+          "correspondence_precision": 0.9574105621805792,
+          "rejection": "",
+          "seconds": 0.5681345000630245
+        },
+        {
+          "label": "base_cells_2 -> ex5_blackout",
+          "positive": true,
+          "manipulation": "ex5_blackout",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.98229053372128,
+          "matches": 1856,
+          "correct_correspondences": 1856,
+          "correspondence_precision": 1.0,
+          "rejection": "",
+          "seconds": 0.6012468000408262
+        },
+        {
+          "label": "mountains -> mountains_manipulated",
+          "positive": true,
+          "manipulation": "known_pair",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9349915837466138,
+          "matches": 397,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 4.8949953999836
+        },
+        {
+          "label": "base_cell vs base_cells_1 (control)",
+          "positive": false,
+          "manipulation": "",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.03296126349061137,
+          "matches": 0,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 0.06708660000003874
+        },
+        {
+          "label": "base_cell vs base_cells_2 (control)",
+          "positive": false,
+          "manipulation": "",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.03338665482978884,
+          "matches": 1,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_matches",
+          "seconds": 0.3730411999858916
+        },
+        {
+          "label": "base_cells_1 vs base_cells_2 (control)",
+          "positive": false,
+          "manipulation": "",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.00619862506953176,
+          "matches": 41,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 0.42448739998508245
+        }
+      ]
+    },
+    {
+      "backend": "disk+lightglue",
+      "audit": {
+        "tool_version": "0.2.0.dev0",
+        "config_fingerprint": "729279bd94943c42802e12a847dd498a7df47807bd4447a656a8e32c08c40806",
+        "timestamp_utc": "2026-09-10T06:41:59+00:00",
+        "device": "cpu",
+        "git_commit": "c4a60fb2e2d8568f047da735a6919b4c34f9cdaa",
+        "git_dirty": true,
+        "python_version": "3.12.10",
+        "torch_version": "2.14.0+cpu",
+        "opencv_version": "5.0.0",
+        "weights_sha256": null,
+        "seed": 1234
+      },
+      "summary": {
+        "positives": 16,
+        "negatives": 3,
+        "recall": 0.625,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall_by_manipulation": {
+          "ex1_affine": {
+            "detected": 0,
+            "total": 3
+          },
+          "ex2_degraded": {
+            "detected": 1,
+            "total": 3
+          },
+          "ex3_copymove": {
+            "detected": 3,
+            "total": 3
+          },
+          "ex4_exposure": {
+            "detected": 3,
+            "total": 3
+          },
+          "ex5_blackout": {
+            "detected": 3,
+            "total": 3
+          },
+          "known_pair": {
+            "detected": 0,
+            "total": 1
+          }
+        }
+      },
+      "cases": [
+        {
+          "label": "base_cell -> ex1_affine",
+          "positive": true,
+          "manipulation": "ex1_affine",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.2257195252933065,
+          "matches": 1,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_matches",
+          "seconds": 8.953475499991328
+        },
+        {
+          "label": "base_cell -> ex2_degraded",
+          "positive": true,
+          "manipulation": "ex2_degraded",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.009256953994548435,
+          "matches": 25,
+          "correct_correspondences": 0,
+          "correspondence_precision": 0.0,
+          "rejection": "too_few_inliers",
+          "seconds": 6.562174100079574
+        },
+        {
+          "label": "base_cell -> ex3_copymove",
+          "positive": true,
+          "manipulation": "ex3_copymove",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9927414570732604,
+          "matches": 1682,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 6.5617613000795245
+        },
+        {
+          "label": "base_cell -> ex4_exposure",
+          "positive": true,
+          "manipulation": "ex4_exposure",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9901031972834309,
+          "matches": 1126,
+          "correct_correspondences": 1124,
+          "correspondence_precision": 0.9982238010657194,
+          "rejection": "",
+          "seconds": 6.736457700026222
+        },
+        {
+          "label": "base_cell -> ex5_blackout",
+          "positive": true,
+          "manipulation": "ex5_blackout",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.99320577667495,
+          "matches": 1388,
+          "correct_correspondences": 1387,
+          "correspondence_precision": 0.9992795389048992,
+          "rejection": "",
+          "seconds": 6.720280299894512
+        },
+        {
+          "label": "base_cells_1 -> ex1_affine",
+          "positive": true,
+          "manipulation": "ex1_affine",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.026482930479732925,
+          "matches": 11,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 7.9779837999958545
+        },
+        {
+          "label": "base_cells_1 -> ex2_degraded",
+          "positive": true,
+          "manipulation": "ex2_degraded",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.984594778505375,
+          "matches": 219,
+          "correct_correspondences": 187,
+          "correspondence_precision": 0.8538812785388128,
+          "rejection": "",
+          "seconds": 8.853278800030239
+        },
+        {
+          "label": "base_cells_1 -> ex3_copymove",
+          "positive": true,
+          "manipulation": "ex3_copymove",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9926395159091184,
+          "matches": 379,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 7.5067820000695065
+        },
+        {
+          "label": "base_cells_1 -> ex4_exposure",
+          "positive": true,
+          "manipulation": "ex4_exposure",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9906724275683728,
+          "matches": 270,
+          "correct_correspondences": 270,
+          "correspondence_precision": 1.0,
+          "rejection": "",
+          "seconds": 7.942569499951787
+        },
+        {
+          "label": "base_cells_1 -> ex5_blackout",
+          "positive": true,
+          "manipulation": "ex5_blackout",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9927142190078139,
+          "matches": 384,
+          "correct_correspondences": 384,
+          "correspondence_precision": 1.0,
+          "rejection": "",
+          "seconds": 7.97814170003403
+        },
+        {
+          "label": "base_cells_2 -> ex1_affine",
+          "positive": true,
+          "manipulation": "ex1_affine",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.05557467544286446,
+          "matches": 10,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 38.25512820004951
+        },
+        {
+          "label": "base_cells_2 -> ex2_degraded",
+          "positive": true,
+          "manipulation": "ex2_degraded",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.15546339616378202,
+          "matches": 5,
+          "correct_correspondences": 0,
+          "correspondence_precision": 0.0,
+          "rejection": "too_few_matches",
+          "seconds": 45.06813259993214
+        },
+        {
+          "label": "base_cells_2 -> ex3_copymove",
+          "positive": true,
+          "manipulation": "ex3_copymove",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9931626863890926,
+          "matches": 1685,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 36.353892499930225
+        },
+        {
+          "label": "base_cells_2 -> ex4_exposure",
+          "positive": true,
+          "manipulation": "ex4_exposure",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9919471967895753,
+          "matches": 1070,
+          "correct_correspondences": 1056,
+          "correspondence_precision": 0.9869158878504672,
+          "rejection": "",
+          "seconds": 36.61063829995692
+        },
+        {
+          "label": "base_cells_2 -> ex5_blackout",
+          "positive": true,
+          "manipulation": "ex5_blackout",
+          "detected": true,
+          "verdict": "likely_manipulated",
+          "confidence": 0.9934266591272337,
+          "matches": 1777,
+          "correct_correspondences": 1777,
+          "correspondence_precision": 1.0,
+          "rejection": "",
+          "seconds": 41.613766800030135
+        },
+        {
+          "label": "mountains -> mountains_manipulated",
+          "positive": true,
+          "manipulation": "known_pair",
+          "detected": false,
+          "verdict": "error",
+          "confidence": 0.0,
+          "matches": 0,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "[enforce fail at alloc_cpu.cpp:117] data. DefaultCPUAllocator: not enough memory: you tried to allocate 13421772800 byte",
+          "seconds": 360.0480380000081
+        },
+        {
+          "label": "base_cell vs base_cells_1 (control)",
+          "positive": false,
+          "manipulation": "",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.03296126349061137,
+          "matches": 0,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "",
+          "seconds": 0.5296767000108957
+        },
+        {
+          "label": "base_cell vs base_cells_2 (control)",
+          "positive": false,
+          "manipulation": "",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.022628817377481444,
+          "matches": 29,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 38.46217740001157
+        },
+        {
+          "label": "base_cells_1 vs base_cells_2 (control)",
+          "positive": false,
+          "manipulation": "",
+          "detected": false,
+          "verdict": "clean",
+          "confidence": 0.011175231184507365,
+          "matches": 20,
+          "correct_correspondences": null,
+          "correspondence_precision": null,
+          "rejection": "too_few_inliers",
+          "seconds": 28.35145299998112
+        }
+      ]
+    }
+  ],
+  "latency": {
+    "orb+mutual_nn": {
+      "p50": 0.29716640000697225,
+      "p90": 0.6764806800056249,
+      "p99": 4.139396079983563
+    },
+    "disk+lightglue": {
+      "p50": 8.853278800030239,
+      "p90": 42.30463996001053,
+      "p99": 303.3516550279945
+    }
+  }
+}

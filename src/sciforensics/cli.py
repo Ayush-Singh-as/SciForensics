@@ -547,6 +547,64 @@ def splits_cmd(
     _out.print(f"\n[bold]Manifest:[/] {destination}")
 
 
+@app.command(name="bench")
+def bench_cmd(
+    inputs: Path = typer.Option(
+        Path("inputs"),
+        "--inputs",
+        "-i",
+        exists=True,
+        file_okay=False,
+        help="Base + manipulated images.",
+    ),
+    out: Path = typer.Option(Path("benchmarks"), "--out", "-o", help="Where results land."),
+    backend: Optional[list[str]] = typer.Option(
+        None, "--backend", "-b", help="orb and/or disk. Repeatable. Default: orb."
+    ),
+    config: Path | None = _ConfigOpt,
+    set_: Optional[list[str]] = _SetOpt,
+    device: str | None = _DeviceOpt,
+    log_level: str = _LogLevelOpt,
+    log_format: str = _LogFormatOpt,
+) -> None:
+    """Measure recall, false-positive rate and correspondence precision.
+
+    Stage B6. The negative controls are the point: ``run_demo.py`` paired each
+    base only with its own manipulations, so the project could not state a
+    false-positive rate at all. Every cross-base pair is a control here.
+    """
+    cfg = _bootstrap(config, set_, log_level, log_format)
+
+    from sciforensics import benchmark
+
+    try:
+        cases = benchmark.discover_cases(inputs)
+    except FileNotFoundError as exc:
+        raise _fail(exc, "benchmark failed") from exc
+
+    reports = []
+    for label, variant in benchmark.iter_backends(cfg, backend or ["orb"]):
+        _out.print(f"[dim]running {label} over {len(cases)} cases...[/]")
+        reports.append(benchmark.run(variant, cases, device=device or "cpu", backend=label))
+
+    json_path, md_path = benchmark.write_results(reports, out)
+
+    table = Table(header_style="bold")
+    table.add_column("backend")
+    table.add_column("recall", justify="right")
+    table.add_column("FPR", justify="right")
+    table.add_column("precision", justify="right")
+    for report in reports:
+        table.add_row(
+            report.backend,
+            f"{report.recall():.1%}",
+            f"{report.false_positive_rate():.1%}",
+            f"{report.precision():.1%}",
+        )
+    _out.print(table)
+    _out.print(f"[bold]Results:[/] {md_path}  ({json_path.name})")
+
+
 @app.command()
 def serve(
     config: Path | None = _ConfigOpt,

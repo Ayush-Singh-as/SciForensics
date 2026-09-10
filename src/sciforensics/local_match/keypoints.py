@@ -352,16 +352,20 @@ class OrbDetector:
         )
 
 
-def build_detector(cfg: LocalMatchConfig) -> KeypointDetector:
+def build_detector(cfg: LocalMatchConfig, *, device: str = "cpu") -> KeypointDetector:
     """Instantiate the configured detector backend.
 
-    ``disk`` and ``superpoint`` arrive in stage B3; until then requesting one is
-    an explicit error rather than a silent downgrade to ORB, because a benchmark
-    row labelled "SuperPoint" that actually ran ORB would be worse than no row.
+    ``disk`` arrived in stage B3. ``superpoint`` is still unimplemented, and
+    requesting it is an explicit error rather than a silent downgrade to ORB:
+    a benchmark row labelled "SuperPoint" that actually ran ORB would be worse
+    than no row.
     """
     if cfg.detector == "orb":
         return OrbDetector(cfg)
-    raise NotImplementedError(
-        f"detector {cfg.detector!r} is not available yet (learned detectors land in stage B3). "
-        "Use local_match.detector=orb."
-    )
+    if cfg.detector == "disk":
+        # Imported here, not at module scope: kornia and torch are an optional
+        # extra, and `orb` must keep working without them.
+        from sciforensics.local_match.learned import DiskDetector
+
+        return DiskDetector(cfg, device=device)
+    raise NotImplementedError(f"detector {cfg.detector!r} is not available yet. Use orb or disk.")

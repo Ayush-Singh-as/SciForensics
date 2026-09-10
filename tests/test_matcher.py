@@ -15,7 +15,13 @@ import cv2
 import numpy as np
 import pytest
 
-from sciforensics.config import CopyMoveConfig, LocalMatchConfig, Settings
+from sciforensics.config import (
+    ConfigError,
+    CopyMoveConfig,
+    LocalMatchConfig,
+    Settings,
+    load_config,
+)
 from sciforensics.local_match.keypoints import Detection
 from sciforensics.local_match.matcher import (
     BruteForceMatcher,
@@ -411,11 +417,22 @@ def test_keypoint_evidence_records_roi_abandonment_per_side() -> None:
     assert evidence.kept_left == evidence.kept_right  # same count, different provenance
 
 
-def test_build_matcher_rejects_unimplemented_backends(cfg: Settings) -> None:
-    """A benchmark row must never be mislabelled by a silent fallback to ORB."""
+def test_build_matcher_returns_the_brute_force_backend_by_default(cfg: Settings) -> None:
+    """`lightglue` landed in stage B3 and is covered by `tests/test_learned.py`.
+
+    The no-silent-fallback principle is still asserted -- on the detector side,
+    where `superpoint` remains unimplemented. `Literal` typing on
+    `LocalMatchConfig.matcher` means an unknown *name* is rejected by config
+    validation before a builder ever sees it, so there is no third matcher left
+    to assert a NotImplementedError against here.
+    """
     assert isinstance(build_matcher(cfg.local_match), BruteForceMatcher)
-    with pytest.raises(NotImplementedError, match="lightglue"):
-        build_matcher(cfg.local_match.model_copy(update={"matcher": "lightglue"}))
+
+    # An unknown matcher name cannot reach a builder at all: `Literal` typing on
+    # `LocalMatchConfig.matcher` rejects it during config validation, which is
+    # the earlier and better place to fail.
+    with pytest.raises(ConfigError, match="matcher"):
+        load_config(overrides=["local_match.matcher=not-a-matcher"], use_env=False)
 
 
 def test_matcher_uses_hamming_for_binary_descriptors(cfg: Settings) -> None:

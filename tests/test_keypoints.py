@@ -377,11 +377,16 @@ def test_detection_is_deterministic(cfg: Settings, texture: np.ndarray) -> None:
 
 
 def test_build_detector_refuses_a_backend_it_cannot_run(cfg: Settings) -> None:
-    """A benchmark row labelled "SuperPoint" that silently ran ORB is worse than none."""
+    """A benchmark row labelled "SuperPoint" that silently ran ORB is worse than none.
+
+    `disk` landed in stage B3, so `superpoint` is the remaining unimplemented
+    backend and carries this assertion. The principle is unchanged: an
+    unavailable backend must raise rather than downgrade, because a mislabelled
+    benchmark row is worse than a missing one.
+    """
     assert isinstance(build_detector(cfg.local_match), OrbDetector)
-    for backend in ("disk", "superpoint"):
-        with pytest.raises(NotImplementedError, match=backend):
-            build_detector(_cfg(cfg, detector=backend))
+    with pytest.raises(NotImplementedError, match="superpoint"):
+        build_detector(_cfg(cfg, detector="superpoint"))
 
 
 def test_detector_declares_the_norm_its_descriptors_need(cfg: Settings) -> None:

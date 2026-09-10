@@ -63,7 +63,11 @@ Stage **B** (defensible science), Stage **C** (deployable tool).
 | **A3** Real reports | Jinja2 HTML → PDF (Chromium *or* WeasyPrint), raster overlays | ✅ **done** — **bug 7 closed and PDF verified**: 2-page PDF, extractable text, full disclaimer intact |
 | **A4** Web demo | FastAPI + Next.js 16, docker-compose | ✅ **done** — API + UI build and run; end-to-end analysis verified via CLI |
 | **B1** Data hygiene | Layout-aware discovery, frozen content-addressed splits, `DATA_CARD.md` | ✅ **done** — **bug 1 closed; all 14 bugs now fixed** |
-| **B2–B6** Science | Retrain, LightGlue, CMFD eval, calibration, benchmarks | ⏳ **B2 blocked**: no datasets downloaded (`data/` is gitignored and empty) |
+| **B3** Learned matching | DISK + LightGlue via kornia, behind the existing Protocols | ✅ **implemented** — but **measured worse than ORB**; see §8c |
+| **B6** Benchmark harness | `sciforensics bench`: recall, **FPR**, precision, correspondence precision, latency | ✅ **done** — first precision figure the project has ever had |
+| **B2** Retrain | GAP head, BCEWithLogits, hard negatives | ⏳ **blocked**: no datasets downloaded (`data/` is gitignored and empty) |
+| **B4** CMFD eval | Per-pixel IoU/F1 vs Polimi masks | ⏳ blocked on Polimi download; **defaults need retuning** (see §8b) |
+| **B5** Calibration | Fit logistic/isotonic on the `calib` split | ⏳ blocked on B2/B4 |
 | **C1–C4** Product | PDF→panels, FAISS retrieval, hardening, docs | ❌ **not started** |
 
 **~14,500 lines** landed in commit `bcb29bc` ("Fixed some bugs") — the entire `src/sciforensics/`
@@ -392,6 +396,80 @@ A real manipulation embeds **further away** than an unrelated image. No fusion w
 any embedding weight large enough to promote the true positive also promotes the control. It is a
 fact about the checkpoint, and it is precisely why **B1/B2 (retrain) and B3 (learned matching)**
 exist.
+
+---
+
+## 8c. Stage B measured results (2026-09-10)
+
+### B6 — the project's first precision figure
+
+`sciforensics bench` over 19 cases (16 positives, 3 genuine negative controls):
+
+| Backend | Recall | FPR | Precision | Latency p50 |
+|---|---|---|---|---|
+| `orb+mutual_nn` | **68.8%** | **0.0%** | **100.0%** | **0.30 s** |
+| `disk+lightglue` | 62.5% | 0.0% | 100.0% | 8.85 s |
+
+**Zero false positives on genuine unrelated pairs** — bug 4's fix holding under
+measurement rather than assertion. `run_demo.py` could not produce any of these numbers: it
+paired each base only with its own manipulations, so there was not one unrelated pair.
+
+**Caveat, stated in the generated report too: 3 controls is not a rate.** A 0.0% FPR over three
+pairs is consistent with a true rate of several percent. It bounds the obvious failure modes and
+nothing more; a publishable figure needs a real corpus (BioFors, held out).
+
+### B3 — implemented, and measured *worse* than ORB
+
+The plan predicted learned matching would fix the 0/3 signal-degradation failures. **It does not.**
+
+| Manipulation | `orb` | `disk` |
+|---|---|---|
+| `ex1_affine` (45°+1.2×+mirror) | 0/3 | 0/3 |
+| `ex2_degraded` (JPEG q25+noise) | 1/3 | 1/3 |
+| `ex3_copymove` | 3/3 | 3/3 |
+| `ex4_exposure` | 3/3 | 3/3 |
+| `ex5_blackout` | 3/3 | 3/3 |
+| `known_pair` (mountains 180°) | **1/1** | **0/1** |
+
+Identical everywhere except the one pair DISK *loses*, at **30× the latency**. So ORB remains the
+default and DISK is a benchmark row, not a promotion.
+
+**Why the match counts were misleading.** DISK produces *more* matches than ORB on two of three
+degradation pairs — and measuring against the known transform shows the extra matches are junk:
+
+| Pair | Backend | Matches | Correct | Precision |
+|---|---|---|---|---|
+| `base_cell → ex2_degraded` | orb | 4 | 2 | 50.0% |
+| `base_cell → ex2_degraded` | **disk** | **25** | **0** | **0.0%** |
+| `base_cells_1 → ex2_degraded` | orb | 111 | 88 | 79.3% |
+| `base_cells_1 → ex2_degraded` | **disk** | **215** | **179** | **83.3%** |
+| `base_cells_2 → ex2_degraded` | orb | 34 | 1 | 2.9% |
+| `base_cells_2 → ex2_degraded` | **disk** | **5** | **0** | **0.0%** |
+
+`ex2_degraded` applies **no geometric change**, so the true transform is the identity and
+"correct" is checkable. A harness counting matches would have reported DISK as a 6× improvement on
+`base_cell` while the pipeline got strictly worse. **This is why `bench` scores correspondences
+against the transform, not the count.**
+
+`ex1_affine` staying 0/3 is consistent with the Stage A finding that DISK is *also* not
+mirror-invariant: 2,000 keypoints per side yielded 6 matches on a mirrored pair.
+
+### A harness bug found by its own first run
+
+The first run reported **FPR 10.0%, precision 90.9%**. Wrong — and wrong in the flattering
+direction for the *controls*. `mountains`/`mountains_manipulated` share content but do not use the
+`<base>_<suffix>` naming, so `discover_cases` paired them as unrelated and scored a **correct
+detection as a false positive**. Corrected via `KNOWN_POSITIVES`, the true figures are 0.0% and
+100.0%. A harness bug does not produce an obviously broken number, it produces a plausible wrong
+one — hence `tests/test_benchmark.py` pins the classification rules with no model in the loop.
+
+### Honest read on Stage B
+
+What the numbers actually say is that **`ex1_affine` (0/3) and `ex2_degraded` (1/3) are not
+matcher problems.** Swapping ORB for a state-of-the-art learned matcher changed neither. Both
+failures are dominated by the **embedding**, which is the component trained on a set that was 82%
+segmentation masks (bug 1) — and which scores a true positive at 0.1877 against 0.3781 for an
+unrelated control. **B2 (retrain) is the critical path, not B3.**
 
 ---
 

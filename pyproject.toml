@@ -226,6 +226,7 @@ markers = [
     "gpu: requires CUDA",
     "weights: requires the pretrained embedding weights to be present",
     "data: requires the training/benchmark datasets to be present",
+    "learned: requires the [match] extra (kornia) and downloads DISK/LightGlue weights",
 ]
 filterwarnings = ["error::DeprecationWarning:sciforensics.*"]
 
