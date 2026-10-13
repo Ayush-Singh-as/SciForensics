@@ -59,11 +59,14 @@ GitHub release URL cannot break the container's first analysis.
 1. Authenticate to Fly.io and create an app from the repository root:
 
    ```bash
-   fly launch --no-deploy
+   fly launch --no-deploy --dockerfile docker/api.Dockerfile --region sin
    ```
 
    Keep the supplied `fly.toml` CPU/memory settings and `docker/api.Dockerfile`.
    Choose a unique app name. No database or volume is required.
+   The supplied region is `sin` (Singapore). Check `fly platform regions` before
+   choosing another region. A successful launch writes `app = "<your-app>"` to
+   `fly.toml`; complete launch before running `deploy` or `scale`.
 
 2. In Vercel, import this repository with **Root Directory = `web`**. Add the
    environment variable `SCIFORENSICS_API=https://<your-fly-app>.fly.dev` for the
