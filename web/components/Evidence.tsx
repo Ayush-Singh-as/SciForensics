@@ -377,8 +377,8 @@ export function ThresholdControls({
             id={`band-${key}`}
             className="slider"
             type="range"
-            min={0}
-            max={1}
+            min={key === "inconclusive" ? 0 : key === "suspicious" ? bands.inconclusive + .01 : bands.suspicious + .01}
+            max={key === "likely_manipulated" ? 1 : key === "suspicious" ? bands.likely_manipulated - .01 : bands.suspicious - .01}
             step={0.01}
             value={bands[key]}
             onChange={(event) =>

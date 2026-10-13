@@ -1262,7 +1262,7 @@ def read_asset(name: str) -> np.ndarray:
 
 @pytest.mark.weights
 def test_a_real_manipulation_ranks_below_a_negative_control(
-    cfg: Settings, weights_path: Path, bands: BandsConfig
+    cfg: Settings, weights_path: Path, bands: BandsConfig, tmp_path: Path
 ) -> None:
     """Why no weight rescues the unverified case, and why stages B2/B3 exist.
 
@@ -1275,9 +1275,24 @@ def test_a_real_manipulation_ranks_below_a_negative_control(
     """
     from sciforensics.global_match import Embedder
 
-    embedder = Embedder(cfg.global_match, image=cfg.image, weights=weights_path, device="cpu")
+    embedder = Embedder(
+        cfg.global_match,
+        image=cfg.image.model_copy(update={"embed_resize": "squash"}),
+        weights=weights_path,
+        device="cpu",
+    )
     base = read_asset("base_cell.png")
-    degraded = read_asset("base_cell_ex2_degraded.jpg")
+    # Generate the seeded manipulation rather than depending on an ignored,
+    # potentially stale file left by an earlier demo run.
+    from PIL import Image
+
+    source = Image.open(Path(__file__).resolve().parents[1] / "inputs/base_cell.png").convert("RGB")
+    rgb = np.asarray(source, dtype=np.float32)
+    noise = np.random.default_rng(1234).normal(0, 20, rgb.shape).astype(np.float32)
+    generated = tmp_path / "degraded.jpg"
+    Image.fromarray(np.clip(rgb + noise, 0, 255).astype(np.uint8)).save(generated, quality=25)
+    degraded = cv2.imread(str(generated), cv2.IMREAD_GRAYSCALE)
+    assert degraded is not None
     unrelated = read_asset("base_cells_2.png")
 
     manipulation = embedder.compare(base, degraded, attribution=False)

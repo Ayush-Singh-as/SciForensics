@@ -8,6 +8,7 @@ therefore carries a :class:`~sciforensics.types.AuditBlock` built here.
 from __future__ import annotations
 
 import hashlib
+import os
 import platform
 import subprocess
 from datetime import datetime, timezone
@@ -70,7 +71,8 @@ def _git(*args: str) -> str | None:
 @lru_cache(maxsize=1)
 def git_commit() -> str | None:
     """Full SHA of ``HEAD``, or ``None`` outside a git checkout."""
-    return _git("rev-parse", "HEAD")
+    revision = os.environ.get("SCIFORENSICS_BUILD_REVISION")
+    return revision if revision and revision != "unknown" else _git("rev-parse", "HEAD")
 
 
 @lru_cache(maxsize=1)

@@ -70,7 +70,12 @@ class Written:
     @property
     def primary(self) -> Path | None:
         """The file to point a human at."""
-        return self.pdf or self.html or self.json_path
+        return (
+            self.pdf
+            or self.html
+            or self.json_path
+            or next((path for path in self.images if path.name == "report.png"), None)
+        )
 
 
 def _environment() -> Environment:
@@ -278,6 +283,13 @@ def render_pair(
                 )
             )
 
+    for side, image, detection in (
+        ("left", analysis.left, analysis.left_keypoints),
+        ("right", analysis.right, analysis.right_keypoints),
+    ):
+        if detection is not None:
+            items.append(ov.keypoint_overlay(image, detection, side=side))
+
     if analysis.correspondences is not None:
         items.append(
             ov.match_overlay(
@@ -333,10 +345,9 @@ def render_pair(
             html_path = None
 
     if "png" in wanted:
-        # The contact sheet is a Stage A3 nice-to-have for README embedding; the
-        # individual overlays already cover the same ground, so rather than ship
-        # a half-built composite the request is reported as unhandled.
-        warnings.append("PNG contact-sheet output is not implemented; overlays were written.")
+        from sciforensics.report.contact import contact_sheet
+
+        images = (*images, contact_sheet(items, result, directory / "report.png"))
 
     return Written(
         directory=directory,
@@ -420,6 +431,11 @@ def render_copy_move(
         if "html" not in wanted and pdf_path is not None:
             html_path.unlink()
             html_path = None
+
+    if "png" in wanted:
+        from sciforensics.report.contact import contact_sheet
+
+        images = (*images, contact_sheet(items, result, directory / "report.png"))
 
     return Written(
         directory=directory,

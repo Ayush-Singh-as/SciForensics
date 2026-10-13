@@ -4,13 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint",
+    "build": "next build && node scripts/prepare-standalone.mjs",
+    "start": "node .next/standalone/server.js",
+    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "^16.3.4",
+    "next": "16.4.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },

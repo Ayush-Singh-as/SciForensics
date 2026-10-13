@@ -36,23 +36,35 @@ a 40,000x40,000 PNG compresses to a few hundred KB and would otherwise become a
 
 from __future__ import annotations
 
+import asyncio
+import os
 import shutil
 import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from sciforensics import __version__
 from sciforensics.config import Settings, load_config
+from sciforensics.demo import ASSET_ROOT, EXAMPLES
 from sciforensics.runtime import get_logger, setup_logging
 
 _log = get_logger(__name__)
@@ -98,6 +110,11 @@ class _Store:
             self._expire_locked()
             return self._items.get(key)
 
+    def update(self, key: str, value: dict[str, Any]) -> None:
+        with self._lock:
+            if key in self._items:
+                self._items[key] = {**self._items[key], **value, "created": time.monotonic()}
+
     def _expire_locked(self) -> None:
         """Drop anything past its TTL. Called under `_lock`.
 
@@ -108,7 +125,12 @@ class _Store:
         cache-disabling deployment would reach for first.
         """
         cutoff = time.monotonic() - self.ttl_seconds
-        stale = [key for key in self._order if self._items.get(key, {}).get("created", 0) <= cutoff]
+        stale = [
+            key
+            for key in self._order
+            if self._items.get(key, {}).get("created", 0) <= cutoff
+            and self._items.get(key, {}).get("status") not in {"queued", "running"}
+        ]
         for key in stale:
             self._order.remove(key)
             self._drop_locked(key)
@@ -133,14 +155,24 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     with a CPU-pinned config and an injected pipeline without touching global
     state or loading a 35 MB checkpoint.
     """
-    settings = cfg or load_config()
+    snapshot = os.environ.get("SCIFORENSICS_SERVE_SETTINGS")
+    settings = cfg or (Settings.model_validate_json(snapshot) if snapshot else load_config())
     setup_logging(level=settings.runtime.log_level, fmt=settings.runtime.log_format)
+
+    executor = ThreadPoolExecutor(max_workers=settings.api.max_concurrent_jobs)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # noqa: ARG001
+        yield
+        executor.shutdown(wait=True)
+        shutil.rmtree(workdir, ignore_errors=True)
 
     app = FastAPI(
         title="SciForensics",
         version=__version__,
         summary="Forensic detection of image reuse and manipulation in scientific figures.",
         docs_url="/docs",
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -154,6 +186,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     workdir = Path(tempfile.mkdtemp(prefix="sciforensics-api-"))
     # One pipeline, one lock. See the module docstring.
     state: dict[str, Any] = {"pipeline": None}
+    app.state.pipeline_state = state
     pipeline_lock = threading.Lock()
 
     # `api.max_concurrent_jobs` was configured and enforced by nothing, so the
@@ -260,15 +293,20 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         job_id = uuid.uuid4().hex[:16]
         directory = workdir / job_id
         directory.mkdir(parents=True, exist_ok=True)
-        yield job_id, directory
+        try:
+            yield job_id, directory
+        except Exception:
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
 
     def _render(analysis: Any, directory: Path) -> dict[str, Any]:
         """Write overlays and return the evidence payload the frontend consumes."""
+        from sciforensics.api.evidence import viewer_payload
         from sciforensics.pipeline import CopyMoveAnalysis
         from sciforensics.report.render import render_copy_move, render_pair
 
         render = render_copy_move if isinstance(analysis, CopyMoveAnalysis) else render_pair
-        written = render(analysis, settings, directory, formats=("html", "json"))
+        written = render(analysis, settings, directory, formats=("html", "json", "pdf"))
         # Descriptors, not bare filenames: the caption and trust level were
         # already computed in `overlays.py` for the PDF, and sending them keeps
         # the web demo from labelling an overlay differently from the report of
@@ -285,7 +323,69 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
                 for name, descriptor in written.overlays.items()
             ],
             "warnings": list(written.warnings),
+            "viewer": viewer_payload(analysis, limit=settings.report.max_match_lines),
+            "report_format": "pdf" if written.pdf else "html",
         }
+
+    def _submit(kind: str, uploads: list[UploadFile]) -> JSONResponse:
+        _count("requests")
+        if not admission.acquire(blocking=False):
+            _count("rejected")
+            raise HTTPException(
+                503, "server is at capacity; retry shortly", headers={"Retry-After": "10"}
+            )
+        try:
+            with _job() as (job_id, directory):
+                paths = [
+                    _save(
+                        upload,
+                        directory / f"input{index}{Path(upload.filename or '').suffix.lower()}",
+                    )
+                    for index, upload in enumerate(uploads)
+                ]
+                store.put(
+                    job_id, {"directory": str(directory), "status": "queued", "stage": "queued"}
+                )
+                executor.submit(_run, job_id, directory, kind, paths)
+        except Exception:
+            admission.release()
+            raise
+        return JSONResponse(
+            {"job_id": job_id, "status": "queued", "stage": "queued"}, status_code=202
+        )
+
+    def _run(job_id: str, directory: Path, kind: str, paths: list[Path]) -> None:
+        from sciforensics.types import Stage
+
+        def progress(stage: Stage) -> None:
+            store.update(job_id, {"status": "running", "stage": stage.value})
+
+        try:
+            with pipeline_lock:
+                store.update(job_id, {"status": "running", "stage": "loading"})
+                runner = pipeline()
+                analysis = (
+                    runner.compare(*paths, force_local=True, progress=progress)
+                    if kind == "compare"
+                    else runner.copy_move(paths[0], progress=progress)
+                )
+                store.update(job_id, {"stage": "report"})
+                payload = _render(analysis, directory)
+            store.update(job_id, {**payload, "status": "complete", "stage": "complete"})
+            _count("completed")
+        except Exception:
+            _log.exception("background analysis failed")
+            store.update(
+                job_id,
+                {
+                    "status": "failed",
+                    "stage": "failed",
+                    "error": "Analysis failed. Check the API logs and checkpoint configuration.",
+                },
+            )
+            _count("failed")
+        finally:
+            admission.release()
 
     # --------------------------------------------------------------- routes
     @app.get("/healthz")
@@ -364,49 +464,35 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
                 "min_inlier_ratio": settings.geometry.min_inlier_ratio,
             },
             "bands": settings.fusion.bands.model_dump(mode="json"),
-            "calibrated": False,
+            "calibrated": settings.fusion.calibrator is not None,
         }
 
     @app.get("/v1/examples")
     def examples() -> dict[str, Any]:
-        """Curated pairs shipped in the repo, negative controls included.
-
-        The negative controls are listed deliberately. A demo gallery of only
-        true positives is how a tool ends up with an unmeasured false-positive
-        rate, which is the gap stage B6 exists to close.
-        """
-        root = Path(__file__).resolve().parents[3]
-        catalogue = [
-            {
-                "id": "mountains-flip",
-                "label": "Mirrored photograph",
-                "note": "Vertically flipped. The prototype reported flip=no on this pair (bug 2).",
-                "kind": "positive",
-                "left": "inputs/mountains.jpg",
-                "right": "inputs/mountains_manipulated.jpg",
-            },
-            {
-                "id": "cells-unrelated",
-                "label": "Unrelated cell panels",
-                "note": (
-                    "Negative control: different source images, so a finding "
-                    "here is a false positive."
-                ),
-                "kind": "negative",
-                "left": "inputs/base_cell.png",
-                "right": "inputs/base_cells_2.png",
-            },
-        ]
         return {
             "examples": [
-                item
-                for item in catalogue
-                if (root / item["left"]).is_file() and (root / item["right"]).is_file()
+                {
+                    **item,
+                    "left": f"/v1/examples/{item['id']}/left",
+                    "right": f"/v1/examples/{item['id']}/right" if item["right"] else None,
+                }
+                for item in EXAMPLES
             ]
         }
 
+    @app.get("/v1/examples/{example_id}/{side}")
+    def example_asset(example_id: str, side: str) -> FileResponse:
+        item = next((e for e in EXAMPLES if e["id"] == example_id), None)
+        if item is None or side not in {"left", "right"} or not item[side]:
+            raise HTTPException(404, "unknown example")
+        return FileResponse(ASSET_ROOT / item[side], filename=item[side])
+
     @app.post("/v1/compare")
-    def compare(left: UploadFile = File(...), right: UploadFile = File(...)) -> dict[str, Any]:
+    def compare(
+        left: UploadFile = File(...), right: UploadFile = File(...), background: bool = False
+    ) -> Any:
+        if background:
+            return _submit("compare", [left, right])
         with _admit(), _job() as (job_id, directory):
             left_path = _save(left, directory / f"left{Path(left.filename or '').suffix.lower()}")
             right_path = _save(
@@ -414,7 +500,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             )
             with pipeline_lock:
                 try:
-                    analysis = pipeline().compare(left_path, right_path)
+                    analysis = pipeline().compare(left_path, right_path, force_local=True)
                 except Exception as exc:
                     _count("failed")
                     _log.exception("compare failed")
@@ -422,11 +508,16 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
                 payload = _render(analysis, directory)
                 _count("completed")
 
-            store.put(job_id, {"directory": str(directory), **payload})
-            return {"job_id": job_id, **payload}
+            store.put(
+                job_id,
+                {"directory": str(directory), "status": "complete", "stage": "complete", **payload},
+            )
+            return {"job_id": job_id, "status": "complete", **payload}
 
     @app.post("/v1/cmfd")
-    def cmfd(image: UploadFile = File(...)) -> dict[str, Any]:
+    def cmfd(image: UploadFile = File(...), background: bool = False) -> Any:
+        if background:
+            return _submit("cmfd", [image])
         with _admit(), _job() as (job_id, directory):
             path = _save(image, directory / f"input{Path(image.filename or '').suffix.lower()}")
             with pipeline_lock:
@@ -439,8 +530,11 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
                 payload = _render(analysis, directory)
                 _count("completed")
 
-            store.put(job_id, {"directory": str(directory), **payload})
-            return {"job_id": job_id, **payload}
+            store.put(
+                job_id,
+                {"directory": str(directory), "status": "complete", "stage": "complete", **payload},
+            )
+            return {"job_id": job_id, "status": "complete", **payload}
 
     @app.get("/v1/jobs/{job_id}")
     def read_job(job_id: str) -> dict[str, Any]:
@@ -448,6 +542,29 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         if record is None:
             raise HTTPException(404, "unknown or expired job")
         return {k: v for k, v in record.items() if k != "directory"}
+
+    @app.websocket("/v1/jobs/{job_id}/progress")
+    async def job_progress(socket: WebSocket, job_id: str) -> None:
+        origin = socket.headers.get("origin")
+        if origin and origin not in settings.api.cors_origins:
+            await socket.close(code=1008)
+            return
+        await socket.accept()
+        try:
+            while True:
+                record = store.get(job_id)
+                if record is None:
+                    await socket.send_json({"status": "failed", "error": "unknown or expired job"})
+                    break
+                await socket.send_json({k: record.get(k) for k in ("status", "stage", "error")})
+                if record.get("status") in {"complete", "failed"}:
+                    break
+                await asyncio.sleep(0.2)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            with suppress(RuntimeError, WebSocketDisconnect):
+                await socket.close()
 
     @app.get("/v1/jobs/{job_id}/assets/{name}")
     def read_asset(job_id: str, name: str) -> FileResponse:

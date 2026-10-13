@@ -46,32 +46,11 @@ image:
   #   squash    - resize the whole frame to embed_size^2, ignoring aspect ratio
   #   letterbox - scale by one factor, centre, and zero-pad the remainder
   #
-  # `squash` is deliberate here, and it is the LEGACY behaviour rather than a
-  # fix, because the checkpoint leaves no better option. Training preprocessed
-  # with transforms.Resize(256) + CenterCrop(128) -- short side to 256 with
-  # aspect PRESERVED, then a centre crop -- while inference squashed the full
-  # frame. So the trained distribution matches neither mode: it is aspect-correct
-  # but sees only a centre window, and it has never seen padding.
-  #
-  # Measured over the 20 images in inputs/ (15 base-vs-manipulation positives,
-  # 175 cross-base negatives), separating positives from negatives by embedding
-  # distance:
-  #
-  #     squash (legacy)     AUC 0.957   best accuracy 0.963
-  #     train-style crop    AUC 0.941   best accuracy 0.956
-  #     letterbox           AUC 0.882   best accuracy 0.938
-  #
-  # Letterboxing this checkpoint makes it WORSE by 0.075 AUC, because the pad
-  # normalises to -1.0 and is out of distribution. Reproducing the training crop
-  # is also worse, and is unusable for forensics regardless: a centre crop at
-  # 128/256 discards most of the frame, so a manipulation outside the centre
-  # would never be examined at all.
-  #
-  # Set letterbox once stage B2 has retrained on letterboxed full frames. That
-  # retrain is the actual fix; this is the best available reading of the model
-  # that exists. n=190 pairs from one asset folder is a weak basis for the
-  # number above, and B6 re-derives it on a frozen split.
-  embed_resize: squash
+  # Preserve aspect ratio in the demo and attribution maps. The inherited
+  # checkpoint was trained on centre crops, so its score remains uncalibrated;
+  # the web demo always performs local verification rather than screening it out.
+  # Use squash only to reproduce historical benchmark figures.
+  embed_resize: letterbox
   letterbox_pad_value: 0
 
 global_match:
@@ -151,6 +130,9 @@ local_match:
   # orb (CPU, always available) | disk | superpoint  (the latter two need
   # the [match] extra and are added in stage B3)
   detector: orb
+  # Retry failed verification against a reflected candidate; map points back
+  # before geometry, so the recovered transform describes the submitted pixels.
+  reflection_search: true
   # mutual_nn (ratio test + mutual nearest neighbour) | lightglue
   matcher: mutual_nn
 
@@ -337,7 +319,7 @@ report:
 api:
   host: 127.0.0.1
   port: 8000
-  cors_origins: ["http://localhost:3000"]
+  cors_origins: ["http://localhost:3000", "http://127.0.0.1:3000"]
   max_upload_bytes: 33554432   # 32 MiB
   # Guard against decompression bombs: reject images whose decoded pixel
   # count exceeds this, before allocating.

@@ -3,7 +3,49 @@
 > Single source of truth for **what this project is, what every file does, what changed, and why.**
 > Read this first in any new session, before touching code.
 >
-> Last updated: 2026-09-07 · Branch `main` (parent repo `c:\ayush` on `master`) · HEAD `bcb29bc`
+> Last updated: 2026-10-13. Older sections below are a historical development ledger.
+
+---
+
+## Current status — Phase A demo (2026-10-13)
+
+This status supersedes the older progress claims and environment notes below.
+
+- **A0:** package/CLI/config/checksum resolution work. The Docker image includes
+  the verified checkpoint so the missing release URL cannot break inference.
+  A manual checkpoint-release workflow and HTTPS URL override are prepared;
+  actual publication still requires GitHub credentials.
+- **A1:** 511 tests pass; 10 learned-backend tests are deliberately excluded from
+  the default Phase A suite. Ruff, mypy, and the frontend production build pass.
+  CI now includes both Docker builds and real browser acceptance. Docker is not
+  installed in this development environment, so that job awaits a CI run.
+- **A2:** aspect-preserving letterboxing is the default. ORB can now retry a
+  reflected candidate. Points are mapped back before geometric verification;
+  RANSAC is used for that candidate because USAC rejects reflected samples.
+  The same rejection gates apply. Ordinary comparisons still use MAGSAC.
+- **A3:** CLI PDF/HTML/JSON/PNG reports were exercised with the real checkpoint;
+  PDF text contains the full disclaimer and audit trail. Both pair and CMFD
+  support compact PNG contact sheets.
+- **A4:** packaged, one-click positive/negative/clone examples; async jobs;
+  WebSocket progress with polling fallback; synced pan/zoom; SVG correspondences;
+  heatmap/keypoint/hull/clone overlays; cached score previews; PDF downloads.
+  `scripts/smoke_demo.py` passed all these flows and recorded `docs/assets/demo.gif`.
+  The demo always gathers local evidence instead of trusting the legacy screen.
+- **Pending external exit criteria:** public Fly.io/Vercel URL and checkpoint
+  Release asset. Public deployment is deferred at the user's request until after
+  local review; hosting/GitHub credentials are not configured. Follow
+  `docs/DEPLOYMENT.md`; `fly.toml` and `web/vercel.json` are supplied.
+
+Stage B/C code is retained but does not require learned matching weights for the
+web demo. Scores stay explicitly uncalibrated; calibration has not been fitted.
+The historical benchmark figures used squash preprocessing and no reflection
+search and must not be presented as evaluation of the updated demo.
+
+**Audit corrections:** `data/` contains about 557 MB of datasets; the earlier
+"empty data" blocker is stale. Frozen corpus manifests are still absent. BioFors
+is held out only when its layout is explicitly selected, and Polimi discovery
+does not enforce the `tampered_blots` evaluation-only policy. B1 is therefore
+partial. B2/B4/B5 and the full B6 scientific evaluation remain unfinished.
 
 ---
 

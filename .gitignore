@@ -31,6 +31,9 @@ coverage.xml
 # ---------------------------------------------------------------------------
 # Datasets are never committed; see docs/DATA_CARD.md for how to fetch them.
 data/
+!src/sciforensics/data/
+!src/sciforensics/data/examples/
+!src/sciforensics/data/examples/*
 
 # Weights are distributed as GitHub Release assets and fetched by
 # sciforensics.weights.ensure(); only the directory placeholder is tracked.

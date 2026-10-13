@@ -601,7 +601,12 @@ def test_the_trained_network_separates_a_manipulation_from_an_unrelated_image(
     manipulated = read_asset("base_cell_ex1_affine.png")
     unrelated = read_asset("base_cells_2.png")
 
-    embedder = Embedder(cfg.global_match, image=cfg.image, weights=weights_path, device="cpu")
+    embedder = Embedder(
+        cfg.global_match,
+        image=cfg.image.model_copy(update={"embed_resize": "squash"}),
+        weights=weights_path,
+        device="cpu",
+    )
     near = embedder.compare(base, manipulated, attribution=False)
     far = embedder.compare(base, unrelated, attribution=False)
 
@@ -696,7 +701,12 @@ def test_the_checkpoint_is_read_once_per_embedder(
     left, right = pair
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(torch, "load", counting_load)
-        embedder = Embedder(cfg.global_match, image=cfg.image, weights=weights_path, device="cpu")
+        embedder = Embedder(
+            cfg.global_match,
+            image=cfg.image.model_copy(update={"embed_resize": "squash"}),
+            weights=weights_path,
+            device="cpu",
+        )
         for _ in range(3):
             embedder.compare(left, right, attribution=False)
 

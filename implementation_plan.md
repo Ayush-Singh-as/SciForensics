@@ -1,5 +1,23 @@
 # SciForensics: zero → pro
 
+## Implementation status (2026-10-13)
+
+Phase A's local implementation is complete and browser-tested: packaging, CPU
+regressions, aspect-preserving preprocessing, reflected matching, all report
+formats, async progress, interactive evidence viewing, one-click examples, and
+PDF downloads. Docker/browser CI and Fly.io/Vercel configuration are prepared.
+The external Phase A exit criteria — a public demo URL and a published checkpoint
+Release asset — are deferred; the user requested successful local review before
+discussing public deployment. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and the current status at the top of
+[PROJECT_BIBLE.md](PROJECT_BIBLE.md).
+
+The confidence gauge is intentionally uncalibrated until Stage B5. Threshold
+controls recompute a rule-score preview from cached distance/contributions;
+reports retain the original settings. Reflection uses RANSAC with identical
+acceptance gates because USAC excludes reflected samples. Historical Stage B
+benchmark results used the prior squash/no-reflection configuration.
+
 ## Context
 
 SciForensics detects image plagiarism and manipulation in scientific publications. The current

@@ -10,8 +10,7 @@
 # the difference. It installs the built artifact into a clean environment and
 # runs the whole suite against that instead of against the checkout.
 #
-# Still to come: a container job, which lands with the Dockerfile. Its smoke test
-# is `sciforensics --version`, so it is worth nothing until the CLI exists.
+# The demo job builds both containers and exercises real inference in Chromium.
 
 name: CI
 
@@ -38,6 +37,42 @@ env:
   PYTHONHASHSEED: "0"
 
 jobs:
+  demo:
+    name: Docker demo and browser acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Frontend types and production build
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Build and start the full demo
+        env:
+          SCIFORENSICS_BUILD_REVISION: ${{ github.sha }}
+        run: docker compose up --build -d --wait
+      - name: Install browser acceptance dependencies
+        run: |
+          pip install playwright PyMuPDF Pillow
+          python -m playwright install --with-deps chromium
+      - name: Exercise the public-facing demo flow
+        run: python scripts/smoke_demo.py
+      - name: Container logs
+        if: failure()
+        run: docker compose logs
+      - name: Shut down
+        if: always()
+        run: docker compose down
   gate:
     name: lint, types, tests (3.12)
     runs-on: ubuntu-latest

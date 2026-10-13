@@ -1,0 +1,12 @@
+# Optional demo profile: stays on CPU and uses the measured CMFD tuning.
+runtime:
+  device: cpu
+image:
+  max_dimension: 1280
+local_match:
+  detector: orb
+  matcher: mutual_nn
+copy_move:
+  nn_ratio: 0.9
+  cluster:
+    min_samples: 4

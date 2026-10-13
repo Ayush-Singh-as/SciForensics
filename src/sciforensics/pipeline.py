@@ -43,12 +43,13 @@ space throughout, converted to original-image pixels at the point of report. See
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from sciforensics import fusion, weights
@@ -293,6 +294,7 @@ class Pipeline:
         *,
         force_local: bool = False,
         attribution: bool | None = None,
+        progress: Callable[[Stage], None] | None = None,
     ) -> PairAnalysis:
         """Compare two images and score the evidence.
 
@@ -324,6 +326,8 @@ class Pipeline:
 
         # --- stage 1: global screen ---------------------------------------
         stages.append(Stage.GLOBAL)
+        if progress:
+            progress(Stage.GLOBAL)
         with _timed(timings, Stage.GLOBAL):
             comparison = self._embedder.compare(left.gray, right.gray, attribution=attribution)
 
@@ -341,6 +345,8 @@ class Pipeline:
         else:
             # --- stage 2: keypoints and correspondence --------------------
             stages.append(Stage.LOCAL)
+            if progress:
+                progress(Stage.LOCAL)
             with _timed(timings, Stage.LOCAL):
                 keypoints = (self.detector.detect(left.gray), self.detector.detect(right.gray))
                 warnings.extend(keypoints[0].warnings)
@@ -353,15 +359,47 @@ class Pipeline:
 
             # --- stage 3: geometry ----------------------------------------
             stages.append(Stage.GEOMETRY)
+            if progress:
+                progress(Stage.GEOMETRY)
             with _timed(timings, Stage.GEOMETRY):
                 verification = (
                     self._verify(left, right, correspondences)
                     if correspondences is not None
                     else _refuse(RejectionReason.TOO_FEW_KEYPOINTS, self.cfg.geometry.method)
                 )
+                if (
+                    self.cfg.local_match.reflection_search
+                    and self.cfg.local_match.detector == "orb"
+                    and not verification.evidence.verified
+                    and keypoints[0].count >= self.cfg.local_match.min_keypoints_per_side
+                ):
+                    reflected = self.detector.detect(cv2.flip(right.gray, 1))
+                    points = reflected.points.copy()
+                    points[:, 0] = right.shape[1] - 1 - points[:, 0]
+                    reflected = replace(
+                        reflected,
+                        points=points,
+                        angles=np.where(reflected.angles < 0, -1, (180 - reflected.angles) % 360),
+                        roi_boxes=tuple(
+                            (right.shape[1] - x - w, y, w, h) for x, y, w, h in reflected.roi_boxes
+                        ),
+                    )
+                    candidate_keypoints = (keypoints[0], reflected)
+                    if self._below_keypoint_floor(candidate_keypoints) is None:
+                        candidate = self.matcher.match(*candidate_keypoints)
+                        checked = self._verify(left, right, candidate, reflected=True)
+                        if checked.evidence.verified:
+                            keypoints = candidate_keypoints
+                            correspondences, verification = candidate, checked
+                            warnings.append(
+                                "Reflection candidate verified; coordinates mapped to "
+                                "submitted image pixels (RANSAC; USAC rejects reflected samples)."
+                            )
 
         # --- stage 4: fusion ----------------------------------------------
         stages.append(Stage.FUSION)
+        if progress:
+            progress(Stage.FUSION)
         with _timed(timings, Stage.FUSION):
             bundle = fusion.EvidenceBundle(
                 global_evidence=comparison.evidence,
@@ -427,7 +465,12 @@ class Pipeline:
         )
 
     def _verify(
-        self, left: LoadedImage, right: LoadedImage, correspondences: Correspondences
+        self,
+        left: LoadedImage,
+        right: LoadedImage,
+        correspondences: Correspondences,
+        *,
+        reflected: bool = False,
     ) -> Verification:
         """Fit and gate a transform between the surviving correspondences.
 
@@ -439,7 +482,11 @@ class Pipeline:
         return verify_with_mask(
             correspondences.src,
             correspondences.dst,
-            self.cfg.geometry,
+            # USAC's sample orientation check excludes reflections. Ordinary
+            # RANSAC can fit them; all acceptance/degeneracy gates remain identical.
+            self.cfg.geometry.model_copy(update={"method": "ransac"})
+            if reflected
+            else self.cfg.geometry,
             src_diagonal=left.diagonal,
             dst_diagonal=right.diagonal,
             src_area=float(height * width),
@@ -448,7 +495,9 @@ class Pipeline:
         )
 
     # -- copy-move ---------------------------------------------------------
-    def copy_move(self, path: str | Path) -> CopyMoveAnalysis:
+    def copy_move(
+        self, path: str | Path, *, progress: Callable[[Stage], None] | None = None
+    ) -> CopyMoveAnalysis:
         """Search one image for cloned regions.
 
         Raises
@@ -475,10 +524,14 @@ class Pipeline:
                 f"regions are in original pixels"
             )
 
+        if progress:
+            progress(Stage.LOCAL)
         with _timed(timings, Stage.LOCAL):
             detected = self.detector.detect(image.gray)
             warnings.extend(detected.warnings)
 
+        if progress:
+            progress(Stage.COPY_MOVE)
         with _timed(timings, Stage.COPY_MOVE):
             detection = detect_copy_move(
                 detected,
@@ -489,6 +542,8 @@ class Pipeline:
                 norm=self.detector.norm,
             )
 
+        if progress:
+            progress(Stage.FUSION)
         with _timed(timings, Stage.FUSION):
             bundle = fusion.CopyMoveBundle(
                 evidence=detection.evidence,

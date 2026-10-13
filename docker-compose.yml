@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
+      args:
+        BUILD_REVISION: ${SCIFORENSICS_BUILD_REVISION:-unknown}
     ports:
       - "8000:8000"
     environment:
@@ -11,9 +13,6 @@ services:
       # preflight. Comma-separated; parsed by pydantic-settings.
       SCIFORENSICS_API__CORS_ORIGINS: '["http://localhost:3000"]'
       SCIFORENSICS_RUNTIME__LOG_FORMAT: json
-    volumes:
-      # Persist the fetched weights across container restarts.
-      - weights:/home/sci/.cache/sciforensics
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=4).status==200 else 1)"]
       interval: 30s
@@ -31,6 +30,3 @@ services:
     depends_on:
       api:
         condition: service_healthy
-
-volumes:
-  weights:

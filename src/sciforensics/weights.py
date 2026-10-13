@@ -197,7 +197,8 @@ def ensure(
             return candidate
 
     cached = cache_dir() / FILENAME
-    if RELEASE_URL is None:
+    release_url = os.environ.get("SCIFORENSICS_WEIGHTS_URL") or RELEASE_URL
+    if release_url is None:
         raise WeightsError(
             "no checkpoint found and no release URL is pinned in this build.\n"
             f"Place {FILENAME} (sha256 {EXPECTED_SHA256[:16]}..., "
@@ -212,6 +213,6 @@ def ensure(
             f"set ${ENV_VAR} or pass allow_download=True"
         )
 
-    _download(RELEASE_URL, cached)
+    _download(release_url, cached)
     verify(cached, expected=expected)
     return cached

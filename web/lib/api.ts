@@ -8,7 +8,7 @@
  * renders a score has to consult it, so it is non-optional on the result.
  */
 
-const BASE = process.env.SCIFORENSICS_API ?? "http://127.0.0.1:8000";
+const BASE = (process.env.SCIFORENSICS_API ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
 export type Verdict = "likely_manipulated" | "suspicious" | "inconclusive" | "clean";
 
@@ -165,6 +165,14 @@ export interface JobPayload<T> {
   result: T;
   overlays: OverlayRef[];
   warnings: string[];
+  report_format: "pdf" | "html";
+  viewer: ViewerData;
+}
+
+export interface ViewerData {
+  aspects: Record<string, number>;
+  matches: { left: [number, number]; right: [number, number]; inlier: boolean }[];
+  hulls: { left?: [number, number][]; right?: [number, number][] };
 }
 
 export interface ServerConfig {
@@ -184,7 +192,8 @@ export interface Example {
   note: string;
   kind: "positive" | "negative";
   left: string;
-  right: string;
+  right: string | null;
+  mode: "compare" | "cmfd";
 }
 
 class ApiError extends Error {
@@ -220,17 +229,65 @@ export async function getExamples(): Promise<{ examples: Example[] }> {
   return unwrap(await fetch(`${BASE}/v1/examples`, { cache: "no-store" }));
 }
 
-export async function compare(left: File, right: File): Promise<JobPayload<ScanResult>> {
+export type Progress = (stage: string) => void;
+
+async function analysis<T>(kind: string, form: FormData, onProgress?: Progress): Promise<JobPayload<T>> {
+  const started = await unwrap<{ job_id: string }>(
+    await fetch(`${BASE}/v1/${kind}?background=true`, { method: "POST", body: form }),
+  );
+  let socket: WebSocket | undefined;
+  try {
+    socket = new WebSocket(`${BASE.replace(/^http/, "ws")}/v1/jobs/${started.job_id}/progress`);
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.stage) onProgress?.(message.stage);
+    };
+  } catch { /* Polling also works when a proxy cannot forward WebSockets. */ }
+  try {
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const job = await unwrap<JobPayload<T> & { status: string; stage: string; error?: string }>(
+        await fetch(`${BASE}/v1/jobs/${started.job_id}`, { cache: "no-store" }),
+      );
+      onProgress?.(job.stage);
+      if (job.status === "failed") throw new Error(job.error ?? "Analysis failed");
+      if (job.status === "complete") return { ...job, job_id: started.job_id };
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    }
+    throw new Error("Analysis timed out. The API may still be working; try again shortly.");
+  } finally { socket?.close(); }
+}
+
+export async function compare(left: File, right: File, onProgress?: Progress): Promise<JobPayload<ScanResult>> {
   const form = new FormData();
   form.append("left", left);
   form.append("right", right);
-  return unwrap(await fetch(`${BASE}/v1/compare`, { method: "POST", body: form }));
+  return analysis("compare", form, onProgress);
 }
 
-export async function cmfd(image: File): Promise<JobPayload<CopyMoveResult>> {
+export async function cmfd(image: File, onProgress?: Progress): Promise<JobPayload<CopyMoveResult>> {
   const form = new FormData();
   form.append("image", image);
-  return unwrap(await fetch(`${BASE}/v1/cmfd`, { method: "POST", body: form }));
+  return analysis("cmfd", form, onProgress);
+}
+
+export async function exampleFile(path: string, name: string): Promise<File> {
+  const response = await fetch(`${BASE}${path}`);
+  if (!response.ok) throw new Error("Could not load the example image");
+  const blob = await response.blob();
+  return new File([blob], `${name}.${blob.type.includes("jpeg") ? "jpg" : "png"}`, { type: blob.type });
+}
+
+/** Preview a changed embedding threshold from cached distance and contributions.
+ * Local evidence stays fixed. This is a rule-score preview, never a probability.
+ */
+export function rescore(result: ScanResult, threshold: number, temperature: number) {
+  const similarity = 1 / (1 + Math.exp((result.global_evidence.distance - threshold) / temperature));
+  const contributions = result.contributions.map((item) => item.name === "embedding_similarity"
+    ? { ...item, value: similarity - .5, contribution: item.weight * (similarity - .5) }
+    : item);
+  const logit = contributions.reduce((sum, item) => sum + item.contribution, 0);
+  return { confidence: 1 / (1 + Math.exp(-logit)), contributions };
 }
 
 export function assetUrl(jobId: string, name: string): string {

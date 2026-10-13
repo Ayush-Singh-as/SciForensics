@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Viewer } from "@/components/Viewer";
 import { Dropzone } from "@/components/Dropzone";
 import {
   Contributions,
@@ -28,7 +29,6 @@ import {
   type CopyMoveResult,
   type Example,
   type JobPayload,
-  type OverlayRef,
   type ScanResult,
   type ServerConfig,
   assetUrl,
@@ -38,6 +38,8 @@ import {
   getConfig,
   getExamples,
   reportUrl,
+  exampleFile,
+  rescore,
 } from "@/lib/api";
 
 type Mode = "compare" | "cmfd";
@@ -58,8 +60,8 @@ export default function Page() {
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [bands, setBands] = useState<Bands | null>(null);
   const [examples, setExamples] = useState<Example[]>([]);
-  const [overlay, setOverlay] = useState<string | null>(null);
-  const [zoomed, setZoomed] = useState(false);
+  const [stage, setStage] = useState("queued");
+  const [threshold, setThreshold] = useState<number | null>(null);
 
   // Server config is the source of truth for the band defaults, so the sliders
   // start where the backend actually sits rather than at numbers duplicated in
@@ -69,6 +71,7 @@ export default function Page() {
       .then((value) => {
         setConfig(value);
         setBands(value.bands);
+        setThreshold(value.global_match.distance_threshold);
       })
       .catch(() => setError("Cannot reach the API. Is `sciforensics serve` running?"));
     getExamples()
@@ -80,14 +83,14 @@ export default function Page() {
     setBusy(true);
     setError(null);
     setJob(null);
-    setOverlay(null);
+    setStage("queued");
     try {
       if (mode === "compare") {
         if (!left || !right) return;
-        setJob({ kind: "compare", payload: await compare(left, right) });
+        setJob({ kind: "compare", payload: await compare(left, right, setStage) });
       } else {
         if (!single) return;
-        setJob({ kind: "cmfd", payload: await cmfd(single) });
+        setJob({ kind: "cmfd", payload: await cmfd(single, setStage) });
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Analysis failed");
@@ -98,20 +101,32 @@ export default function Page() {
 
   const ready = mode === "compare" ? Boolean(left && right) : Boolean(single);
 
-  // The re-banded verdict. Recomputed from the cached confidence whenever a
-  // slider moves — no request, so the evidence cannot shift underneath it.
-  const verdict = useMemo(() => {
-    if (!job || !bands) return null;
-    return bandFor(job.payload.result.confidence, bands);
-  }, [job, bands]);
+  const preview = useMemo(() => {
+    if (!job) return null;
+    if (job.kind === "compare" && threshold !== null && config && !job.payload.result.calibrated) {
+      return rescore(job.payload.result, threshold, config.global_match.similarity_temperature);
+    }
+    return { confidence: job.payload.result.confidence, contributions: job.payload.result.contributions };
+  }, [job, threshold, config]);
+  const verdict = preview && bands ? bandFor(preview.confidence, bands) : null;
+  const previewChanged = Boolean(job?.kind === "compare" && threshold !== job.payload.result.global_evidence.distance_threshold);
 
-  const overlays: OverlayRef[] = job?.payload.overlays ?? [];
-  // Default to the correspondence overlay: it is the one carrying geometric
-  // evidence, so it is what a reader should see first.
-  const active =
-    overlays.find((o) => o.name === overlay) ??
-    overlays.find((o) => o.name === "matches") ??
-    overlays[0];
+  async function useExample(example: Example) {
+    setBusy(true); setError(null); setJob(null); setStage("loading example");
+    setMode(example.mode);
+    try {
+      const a = await exampleFile(example.left, `${example.id}-left`);
+      if (example.mode === "compare" && example.right) {
+        const b = await exampleFile(example.right, `${example.id}-right`);
+        setLeft(a); setRight(b);
+        setJob({ kind: "compare", payload: await compare(a, b, setStage) });
+      } else {
+        setSingle(a);
+        setJob({ kind: "cmfd", payload: await cmfd(a, setStage) });
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Example failed"); }
+    finally { setBusy(false); }
+  }
 
   return (
     <div className="shell">
@@ -125,6 +140,7 @@ export default function Page() {
             <button
               key={value}
               aria-current={mode === value}
+              disabled={busy}
               onClick={() => {
                 setMode(value);
                 setJob(null);
@@ -163,59 +179,15 @@ export default function Page() {
             <div className="empty">
               <span className="spinner" />
               <span style={{ fontSize: 12.5 }}>
-                Running embedding, keypoint and geometry stages…
+                {stage === "report" ? "Rendering report…" : `Analysing: ${stage.replace(/_/g, " ")}…`}
               </span>
             </div>
           )}
 
-          {job && active && (
+          {job && (
             <>
-              <div className="panel">
-                <header>
-                  <h2>Evidence</h2>
-                  <div className="toggles" style={{ marginLeft: "auto" }}>
-                    {overlays.map((item) => (
-                      <button
-                        key={item.name}
-                        className="toggle"
-                        aria-pressed={active?.name === item.name}
-                        onClick={() => {
-                          setOverlay(item.name);
-                          setZoomed(false);
-                        }}
-                      >
-                        {item.name.replace(/_/g, " ")}
-                      </button>
-                    ))}
-                  </div>
-                </header>
-                <div className="body">
-                  {/*
-                    Height-capped by default so the whole overlay -- both panels
-                    of a side-by-side match canvas -- is visible without
-                    scrolling. Clicking restores native resolution for close
-                    inspection. Reading a forensic overlay should not require
-                    hunting for its other half.
-                  */}
-                  <figure
-                    className="viewer"
-                    data-zoom={zoomed}
-                    style={{ margin: 0 }}
-                    onClick={() => setZoomed(!zoomed)}
-                    title={zoomed ? "Click to fit" : "Click to zoom to full resolution"}
-                  >
-                    <img
-                      src={assetUrl(job.payload.job_id, active.file)}
-                      alt={active.caption}
-                    />
-                    <figcaption data-trust={active.trust}>
-                      {active.caption}
-                      {zoomed ? " · Click to fit." : " · Click to view at full resolution."}
-                    </figcaption>
-                  </figure>
-                </div>
-              </div>
-
+              <Viewer key={job.payload.job_id} jobId={job.payload.job_id} overlays={job.payload.overlays}
+                data={job.payload.viewer} single={job.kind === "cmfd"} />
               {job.payload.warnings.length > 0 && (
                 <div className="panel">
                   <header>
@@ -303,7 +275,7 @@ export default function Page() {
                   rel="noreferrer"
                   style={{ width: "100%", marginTop: 7, textDecoration: "none" }}
                 >
-                  Download report
+                  Download {job.payload.report_format === "pdf" ? "PDF" : "HTML"} report
                 </a>
               )}
             </div>
@@ -317,9 +289,9 @@ export default function Page() {
                 </header>
                 <Verdict
                   verdict={verdict}
-                  confidence={job.payload.result.confidence}
+                  confidence={preview?.confidence ?? job.payload.result.confidence}
                   calibrated={job.payload.result.calibrated}
-                  notes={job.payload.result.notes}
+                  notes={previewChanged ? ["Threshold preview: evidence is unchanged; the downloaded report records the original server settings."] : job.payload.result.notes}
                 />
               </div>
 
@@ -328,10 +300,15 @@ export default function Page() {
                   <h3>Thresholds</h3>
                 </header>
                 <div className="body">
+                  {job.kind === "compare" && threshold !== null && !job.payload.result.calibrated && <div style={{ marginBottom: 16 }}>
+                    <label htmlFor="match-threshold">Embedding distance boundary <output className="num">{threshold.toFixed(2)}</output></label>
+                    <input id="match-threshold" className="slider" type="range" min={0.1} max={5} step={0.05} value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} />
+                    <p className="caveat">Re-scores the cached embedding distance and contribution bars. Local geometry stays fixed.</p>
+                  </div>}
                   <ThresholdControls
                     bands={bands}
                     onChange={setBands}
-                    onReset={() => setBands(config.bands)}
+                    onReset={() => { setBands(config.bands); setThreshold(config.global_match.distance_threshold); }}
                   />
                 </div>
               </div>
@@ -367,14 +344,14 @@ export default function Page() {
                     <h3>Score drivers</h3>
                   </header>
                   <div className="body">
-                    <Contributions contributions={job.payload.result.contributions} />
+                    <Contributions contributions={preview?.contributions ?? job.payload.result.contributions} />
                   </div>
                 </div>
               )}
             </>
           )}
 
-          {!job && examples.length > 0 && (
+          {examples.length > 0 && (
             <div className="panel">
               <header>
                 <h3>Examples</h3>
@@ -390,6 +367,7 @@ export default function Page() {
                         </span>
                       </div>
                       <div className="note">{example.note}</div>
+                      <button className="btn" disabled={busy} onClick={() => useExample(example)} aria-label={`Run ${example.label} example`}>Run example</button>
                     </div>
                   ))}
                 </div>

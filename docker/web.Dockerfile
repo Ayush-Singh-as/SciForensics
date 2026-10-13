@@ -17,9 +17,9 @@ RUN npm run build
 FROM node:22-alpine AS run
 WORKDIR /web
 ENV NODE_ENV=production
-COPY --from=build /web/.next ./.next
-COPY --from=build /web/node_modules ./node_modules
-COPY --from=build /web/package.json ./
+ENV HOSTNAME=0.0.0.0
+COPY --from=build --chown=node:node /web/.next/standalone ./
+COPY --from=build --chown=node:node /web/.next/static ./.next/static
 USER node
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

@@ -204,6 +204,7 @@ class RoiConfig(_Base):
 class LocalMatchConfig(_Base):
     detector: Literal["orb", "disk", "superpoint"]
     matcher: Literal["mutual_nn", "lightglue"]
+    reflection_search: bool
     max_features: PositiveInt
     #: Hard floor on surviving keypoints per side, below which matching is not
     #: attempted at all. Under injective mutual-NN matching the number of
@@ -524,6 +525,15 @@ def _env_overlay(environ: Mapping[str, str]) -> dict[str, Any]:
     """
     overlay: dict[str, Any] = {}
     for raw_key, raw_value in environ.items():
+        # Resolver options are not Settings fields. Keep the public weights
+        # environment variables usable alongside normal config overrides.
+        if raw_key in {
+            "SCIFORENSICS_WEIGHTS",
+            "SCIFORENSICS_WEIGHTS_URL",
+            "SCIFORENSICS_BUILD_REVISION",
+            "SCIFORENSICS_SERVE_SETTINGS",
+        }:
+            continue
         if not raw_key.startswith(ENV_PREFIX):
             continue
         suffix = raw_key[len(ENV_PREFIX) :]

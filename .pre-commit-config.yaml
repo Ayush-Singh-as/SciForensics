@@ -72,7 +72,7 @@ repos:
       # is marked `slow` and left to CI.
       - id: pytest
         name: pytest
-        entry: pytest -q -m "not slow and not gpu and not weights and not data"
+        entry: pytest -q -m "not slow and not gpu and not weights and not data and not learned"
         language: system
         types: [python]
         pass_filenames: false

@@ -31,6 +31,7 @@ suppressing findings.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -776,13 +777,21 @@ def serve(
         # Reload needs an import string rather than an object, and the reloader
         # re-imports in a fresh process, so config has to come from the
         # environment rather than the Settings we just built.
-        uvicorn.run(
-            "sciforensics.api.app:create_app",
-            factory=True,
-            host=bind_host,
-            port=bind_port,
-            reload=True,
-        )
+        previous = os.environ.get("SCIFORENSICS_SERVE_SETTINGS")
+        os.environ["SCIFORENSICS_SERVE_SETTINGS"] = cfg.model_dump_json()
+        try:
+            uvicorn.run(
+                "sciforensics.api.app:create_app",
+                factory=True,
+                host=bind_host,
+                port=bind_port,
+                reload=True,
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("SCIFORENSICS_SERVE_SETTINGS", None)
+            else:
+                os.environ["SCIFORENSICS_SERVE_SETTINGS"] = previous
         return
 
     # From the concrete module, not the package's lazy __getattr__ re-export:

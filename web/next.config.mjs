@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  output: "standalone",
   // The API base is read at build time so the same image can point at a local
   // backend or a deployed one without a code change.
   env: {

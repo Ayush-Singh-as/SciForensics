@@ -4,79 +4,102 @@ Detects figure reuse and manipulation in scientific papers: the same blot, gel o
 micrograph republished after rotation, reflection, rescaling, recompression or
 partial region duplication.
 
-**Status:** `v0.2.0.dev0`. 515 tests green (505 + 10 learned-backend); `ruff`, `mypy`
-and `pre-commit` clean.
-All 14 audited correctness bugs fixed and verified against real images. Precision
-is measured against real negative controls for the first time.
+**Status:** Phase A's local demo is implemented and verified. Public deployment
+is deferred until after local review; the separate checkpoint release remains
+unpublished.
+The inherited model's confidence is an **uncalibrated score**; Stage B retraining
+and scientific calibration are unfinished.
 
-The design commitment that matters: **the pipeline is allowed to say "I do not
-know."** Geometry returns verified, refuted, *or* abstains with a named reason. A
-prototype that manufactures confident nonsense is worse than useless when a false
-accusation can end a career.
+![Verified demo: examples, evidence overlays, threshold previews, and clone detection](docs/assets/demo.gif)
 
----
-
-## Quickstart
+## Run the demo
 
 ```bash
-pip install -e ".[dev,report,api,match]"
-python -m playwright install chromium        # PDF backend, no system libs needed
+pip install -e '.[demo,dev]'
+python -m playwright install chromium
+sciforensics serve --config configs/demo.yaml
 ```
 
-`models/weights.pth` is not yet published as a release asset, so point at it
-explicitly:
+In a second terminal:
 
 ```bash
-export SCIFORENSICS_GLOBAL_MATCH__WEIGHTS=models/weights.pth   # bash
-$env:SCIFORENSICS_GLOBAL_MATCH__WEIGHTS = "models/weights.pth" # PowerShell
+cd web
+npm ci
+npm run build
+npm start
 ```
 
-### Compare two figures
+Open **http://localhost:3000**. Click **Run example** for rotated reuse, unrelated
+cell panels, or a planted clone, or upload your own images. Inspect synchronized
+pan/zoom, SVG correspondences, heatmaps, keypoints, verified regions, and clone
+masks. Threshold controls preview a score from cached evidence; downloaded PDF
+reports retain the original server settings and complete audit trail.
+
+For a containerized demo:
+
+```bash
+docker compose up --build
+```
+
+The API image includes the checksum-verified checkpoint and packaged gallery.
+No model download is needed on the first analysis. Both containers run as non-root.
+
+See [deployment and verification instructions](docs/DEPLOYMENT.md) for Fly.io +
+Vercel, CORS setup, browser acceptance, and checkpoint publication.
+
+## CLI
 
 ```bash
 sciforensics compare inputs/mountains.jpg inputs/mountains_manipulated.jpg -v
-#  Likely reused or manipulated - confidence 0.935 (uncalibrated score)
-#  Rotation -180.00 deg | Scale 0.9999 | Geometry verified | 377 inliers
+sciforensics compare inputs/mountains.jpg inputs/mountains_manipulated.jpg --report out/report -f pdf -f html -f json -f png
+sciforensics cmfd src/sciforensics/data/examples/cells_clone.png --config configs/demo.yaml
 ```
 
-### Search one figure for cloned regions
+The editable checkout resolves `models/weights.pth` automatically. For a wheel
+installation, provide the checkpoint explicitly:
 
 ```bash
-sciforensics cmfd inputs/base_cells_2_ex3_copymove.png   --set copy_move.nn_ratio=0.9 --set copy_move.cluster.min_samples=4
-#  1 cloned region localized - source (60,44) 131x134 -> clone (380,299)
+export SCIFORENSICS_GLOBAL_MATCH__WEIGHTS=/absolute/path/to/weights.pth
 ```
 
-### Audit a whole manuscript
+The default now preserves aspect ratio with letterboxing. Reflection candidates
+are geometrically checked after their coordinates are mapped back to the supplied
+image. The demo always examines local evidence, even when the inherited embedding
+would screen a pair out. Neither a score nor a geometric finding determines intent
+or misconduct.
+
+## Correctness: before and after
+
+| Case | Prototype | Phase A |
+|---|---|---|
+| Mountains reuse | Scale `0.000`, 107 phantom inliers in the preserved output | Scale `0.9999`, 377 verified inliers, RMS `0.46 px` at the default resolution |
+| Reflection | Flip unreachable under a similarity-only affine | Full affine plus an ORB reflection search; a reflected fixture verifies in original coordinates |
+| Many-to-one matches | Hundreds of matches could collapse onto a few points | Mutual nearest neighbors and distinct-point/spread/conditioning gates |
+| Attribution | Right-hand map could be entirely suppressed | Symmetric pooling and correctly mapped 16×16 attribution |
+| Report conclusion | Prose clipped off a fixed canvas | Flowed HTML/PDF and dynamically sized PNG contact sheets |
+
+The mountains pair is a **180-degree rotation**, not a single-axis reflection;
+`flip=False` is correct. [Original evidence](docs/assets/legacy/mountains_before.json)
+is preserved for comparison.
+
+## Checks
 
 ```bash
-sciforensics scan paper.pdf -o out/scan
-#  PDF -> figures -> panels -> every surviving pair, with coverage reported
+pytest -q                       # Phase A suite; optional learned tests excluded
+ruff check . && ruff format --check .
+mypy
+cd web && npm run typecheck && npm run build
 ```
 
-### Write a report
-
-```bash
-sciforensics compare a.png b.png --report out/report -f pdf -f html -f json
-```
-
-### Measure it
-
-```bash
-sciforensics bench -b orb -b disk        # recall, FPR, precision, latency
-```
-
-### Web demo
-
-```bash
-sciforensics serve --port 8000           # terminal 1
-cd web && npm install && npm run dev     # terminal 2  -> http://localhost:3000
-```
-
----
+The default suite currently passes **511 tests**, with **10 optional learned tests
+deselected**. Learned matching remains available via `[match]` and `pytest -m learned`
+when its weights are installed. Against running servers, the browser acceptance
+script is `python scripts/smoke_demo.py` (requires Playwright + PyMuPDF). CI builds
+both Docker images and runs that browser test with real inference and PDFs.
 
 ## Measured performance
 
-19 cases, 16 positives and 3 genuine negative controls
+Historical Stage B demo benchmark: 19 cases, 16 positives and 3 negative controls
 ([benchmarks/RESULTS.md](benchmarks/RESULTS.md)):
 
 | Backend | Recall | FPR | Precision | Latency p50 |
@@ -88,6 +111,10 @@ cd web && npm install && npm run dev     # terminal 2  -> http://localhost:3000
 rate, the score is **not calibrated**, and there are documented failure modes —
 reflection is 0/3 and heavy recompression is 1/3. All of it is in
 [docs/MODEL_CARD.md](docs/MODEL_CARD.md).
+
+These historical numbers used squash preprocessing and no reflection search;
+reproduce them with `--set image.embed_resize=squash --set local_match.reflection_search=false`.
+They are not a held-out scientific evaluation of the current demo.
 
 Learned matching (DISK+LightGlue) is implemented and measured **worse** than ORB,
 so ORB remains the default. That is a result, not an omission.
